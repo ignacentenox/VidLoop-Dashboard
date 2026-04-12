@@ -72,6 +72,27 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 ## Uso con IPs VPN (WireGuard)
 
+- Este repo incluye scripts auxiliares para conectar las Raspberry por WireGuard y operar el dashboard usando IPs VPN.
+
+Flujo mínimo:
+
+1. En la Raspberry, corré `wireguard_setup_rpi.sh` para instalar WireGuard, generar claves y crear `wg0.conf`.
+2. Copiá la public key que devuelve la Raspberry.
+3. En el VPS, corré `wireguard_add_peer_vps.sh` para dar de alta ese peer.
+4. Cuando la VPN esté operativa, actualizá los hosts del dashboard a las IPs VPN.
+
+Ejemplo rápido:
+
+```bash
+# En la Raspberry
+sudo bash scripts/wireguard_setup_rpi.sh 10.8.0.2/24
+
+# En el VPS
+sudo bash scripts/wireguard_add_peer_vps.sh 10.8.0.2 PUBLIC_KEY_DE_LA_RPI nombre-rpi
+```
+
+### Integracion con el dashboard
+
 - Para instalaciones nuevas, podés sembrar los dispositivos por defecto con `DEFAULT_DEVICES_JSON` en `.env`.
 - Para instalaciones existentes, podés migrar hosts locales a IPs VPN con:
 
@@ -80,7 +101,17 @@ python scripts/switch_devices_to_vpn.py --db data/vidloop_dash.db --mapping-file
 python scripts/switch_devices_to_vpn.py --db data/vidloop_dash.db --mapping-file scripts/devices_vpn.example.json
 ```
 
-- El archivo de ejemplo está en `scripts/devices_vpn.example.json`.
+- El archivo de ejemplo está en `scripts/devices_vpn.example.json` y acepta formato simple `nombre -> ip`:
+
+```json
+{
+	"Principal": "10.50.0.10",
+	"Entrada": "10.50.0.11",
+	"Fondo": "10.50.0.12"
+}
+```
+
+- También podés usar un formato extendido con `host`, `port` y `user` si necesitás cambiar algo más que la IP.
 
 ## Notas
 - El video se genera en el servidor con FFmpeg a partir de imagenes.
