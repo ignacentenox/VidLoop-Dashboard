@@ -1,0 +1,14 @@
+{
+	"venvPath": "../..",
+	"venv": ".venv",
+	"include": [
+		"app",
+		"scripts"
+	],
+	"exclude": [
+		"**/__pycache__",
+		"**/.pytest_cache",
+		"**/.mypy_cache"
+	],
+	"pythonVersion": "3.13"
+}

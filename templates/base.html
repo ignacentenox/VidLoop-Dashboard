@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="es">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VidLoop Dashboard</title>
+    <link rel="icon" type="image/png" href="/static/LOGO%20VIDLOOP.png?v=1" />
+    <link rel="stylesheet" href="/static/styles.css" />
+</head>
+
+<body>
+    <header class="site-header">
+        <div class="container">
+            <div class="header-grid">
+                <div>
+                    <h1>VIDLOOP DASHBOARD</h1>
+                    <p class="lead">Central para gestionar contenido audiovisual</p>
+                </div>
+                <div id="header-status-card"
+                    class="header-card {% if maintenance_enabled|default(false) %}status-maintenance{% else %}status-online{% endif %}">
+                    <p class="header-label">Estado</p>
+                    <p class="header-value" id="header-status-value">
+                        <span class="status-dot" aria-hidden="true"></span>
+                        {% if maintenance_enabled|default(false) %}
+                        Mantenimiento
+                        {% else %}
+                        Online
+                        {% endif %}
+                    </p>
+                    <p class="header-note" id="header-status-note">
+                        {% if maintenance_enabled|default(false) %}
+                        {{ maintenance_message|default('Sistema en mantenimiento temporal') }}
+                        {% else %}
+                        Servidor listo para distribuir contenido
+                        {% endif %}
+                    </p>
+                </div>
+            </div>
+        </div>
+    </header>
+    <main class="container">
+        {% if msg %}
+        <div class="notice success">{{ msg }}</div>
+        {% endif %}
+        {% if err %}
+        <div class="notice error">{{ err }}</div>
+        {% endif %}
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="site-footer">
+        <div class="footer-inner">
+            <p class="footer-text animated-footer">
+                © <span id="year"></span> Todos los derechos reservados. |
+                Desarrollado por <a href="https://wa.me/5493582449174" target="_blank"
+                    class="footer-link ignace-link">IGNACE</a>
+            </p>
+            <button id="toggle-darkmode" title="Cambiar modo claro/oscuro">
+                <span id="darkmode-icon">🌙</span>
+            </button>
+        </div>
+    </footer>
+    <!-- Botón flotante de soporte técnico -->
+    <div id="support-float-btn">
+        <div class="support-popup" id="support-popup">
+            <span class="support-title">Soporte Técnico 24/7</span>
+            <button class="support-contact-btn"
+                onclick="window.open('https://wa.me/5493582449174','_blank')">Contactar</button>
+        </div>
+        <button class="support-fab" id="support-fab" title="Soporte Técnico 24/7">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 8v4l3 3" />
+            </svg>
+        </button>
+    </div>
+    <script>
+        // Mostrar/ocultar popup de soporte
+        const fab = document.getElementById('support-fab');
+        const popup = document.getElementById('support-popup');
+        let popupVisible = false;
+        fab.onclick = function () {
+            popupVisible = !popupVisible;
+            popup.style.display = popupVisible ? 'flex' : 'none';
+        };
+        // Cerrar popup al hacer click fuera
+        document.addEventListener('click', function (e) {
+            if (popupVisible && !document.getElementById('support-float-btn').contains(e.target)) {
+                popup.style.display = 'none';
+                popupVisible = false;
+            }
+        });
+    </script>
+    <script>
+        document.getElementById("year").textContent = new Date().getFullYear();
+    </script>
+    <script>
+        // Toggle dark mode
+        const darkBtn = document.getElementById('toggle-darkmode');
+        const icon = document.getElementById('darkmode-icon');
+        function setDarkMode(on) {
+            document.body.classList.toggle('darkmode', on);
+            icon.textContent = on ? '☀️' : '🌙';
+            localStorage.setItem('darkmode', on ? '1' : '0');
+        }
+        if (darkBtn) {
+            darkBtn.onclick = () => setDarkMode(!document.body.classList.contains('darkmode'));
+        }
+        // Persistencia (por defecto: modo oscuro)
+        const savedDarkmode = localStorage.getItem('darkmode');
+        if (savedDarkmode === null) {
+            setDarkMode(true);
+        } else {
+            setDarkMode(savedDarkmode === '1');
+        }
+
+        function applyHeaderStatus(enabled, message) {
+            const card = document.getElementById('header-status-card');
+            const value = document.getElementById('header-status-value');
+            const note = document.getElementById('header-status-note');
+            if (!card || !value || !note) return;
+
+            const statusText = enabled ? 'Mantenimiento' : 'Online';
+            const statusNote = enabled
+                ? (message && String(message).trim() ? String(message).trim() : 'Sistema en mantenimiento temporal')
+                : 'Servidor listo para distribuir contenido';
+
+            const currentText = value.textContent.replace(/\s+/g, ' ').trim().replace(/^●\s*/, '');
+            const hasChanged = currentText !== statusText;
+
+            card.classList.toggle('status-maintenance', !!enabled);
+            card.classList.toggle('status-online', !enabled);
+
+            value.innerHTML = `<span class="status-dot" aria-hidden="true"></span>${statusText}`;
+            note.textContent = statusNote;
+
+            if (hasChanged) {
+                card.classList.remove('status-changing');
+                void card.offsetWidth;
+                card.classList.add('status-changing');
+            }
+        }
+
+        async function refreshHeaderStatus() {
+            try {
+                const res = await fetch('/admin/maintenance', { method: 'GET' });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!data || data.ok !== true) return;
+                applyHeaderStatus(!!data.enabled, data.message || '');
+            } catch (_) {
+                // No-op para no interrumpir UX
+            }
+        }
+
+        window.applyHeaderStatus = applyHeaderStatus;
+        window.refreshHeaderStatus = refreshHeaderStatus;
+
+        refreshHeaderStatus();
+        setInterval(refreshHeaderStatus, 8000);
+    </script>
+</body>
+
+</html>

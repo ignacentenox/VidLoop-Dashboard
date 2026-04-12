@@ -1,0 +1,1712 @@
+{% extends "base.html" %}
+{% block content %}
+{% set last_upload = uploads[0] if uploads else None %}
+{% set last_event = video_history[0] if video_history else None %}
+
+<section class="panel hero">
+    <div>
+        <p class="eyebrow">Control centralizado</p>
+        <h2>Monitoreá, creá y desplegá contenido en segundos</h2>
+        <p class="lead">Subí imágenes, generá videos y administrá todo desde un solo panel.</p>
+    </div>
+</section>
+
+<div class="admin-panel-grid">
+    {% if is_admin %}
+    <section class="panel admin-panel-section">
+        <h2>Configuración de Mantenimiento</h2>
+        <form id="maintenance-form" class="admin-form">
+            <label>Mensaje de mantenimiento
+                <textarea name="message" id="maintenance-message" rows="2">{{ maintenance_message }}</textarea>
+            </label>
+            <label class="admin-checkbox-label">
+                <input type="checkbox" name="enabled" id="maintenance-enabled" {% if maintenance_enabled %}checked{%
+                    endif %} />
+                Activar mantenimiento
+            </label>
+            <button type="button" id="save-maintenance">Guardar</button>
+            <span id="maintenance-status" class="admin-status">Guardado!</span>
+        </form>
+    </section>
+
+    <section class="panel admin-panel-section">
+        <h2>Agregar Raspberry Pi</h2>
+        <form action="/devices/add" method="post" class="admin-form">
+            <label>Nombre <input type="text" name="name" required /></label>
+            <label>Host/IP VPN <input type="text" name="host" required
+                    placeholder="ej: 100.x.x.x o 192.168.x.x" /></label>
+            <label title="Si la VPN cae, el sistema intenta esta IP automáticamente">IP LAN (fallback) <input
+                    type="text" name="host_lan" placeholder="ej: 192.168.1.50 (opcional)" /></label>
+            <label>Usuario <input type="text" name="user" required /></label>
+
+            <!-- Campo contraseña SSH estilizado -->
+            <div class="ssh-password-field">
+                <label for="ssh_password">Contraseña SSH</label>
+                <div class="ssh-password-input-wrapper">
+                    <span class="ssh-lock-icon">🔒</span>
+                    <input type="password" id="ssh_password" name="ssh_password" placeholder="Ingresá la contraseña" />
+                    <button type="button" class="toggle-password-btn"
+                        onclick="togglePasswordVisibility('ssh_password', this)">
+                        <span class="eye-icon">👁️</span>
+                    </button>
+                </div>
+            </div>
+
+            <label>Usuario dueño
+                <select name="owner_user_id">
+                    <option value="">Sin asignar</option>
+                    {% for owner in users %}
+                    <option value="{{ owner.id }}">{{ owner.username }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <!-- Campos ocultos con valores por defecto -->
+            <input type="hidden" name="port" value="22" />
+            <input type="hidden" name="remote_path" value="/home/admin/videos" />
+            <input type="hidden" name="remote_filename" value="VIDLOOP.mp4" />
+            <button type="submit">Agregar dispositivo</button>
+        </form>
+    </section>
+    {% endif %}
+
+    <section class="panel admin-panel-section">
+        <h2>Subir imágenes y generar video</h2>
+        <form action="/upload-images" method="post" enctype="multipart/form-data" class="admin-form">
+            <div class="admin-fields-row">
+                <div class="upload-field-group">
+                    <label for="duration_sec">Duración por imagen (segundos)</label>
+                    <input type="number" id="duration_sec" name="duration_sec" value="20" min="1" />
+                </div>
+                <div class="upload-field-group">
+                    <label for="transition_type">Tipo de transición</label>
+                    <select id="transition_type" name="transition_type">
+                        <option value="fade" selected>Fade (Desvanecimiento)</option>
+                        <option value="cut">Cut (Corte directo)</option>
+                        <option value="slide">Slide (Deslizar)</option>
+                        <option value="zoom">Zoom</option>
+                        <option value="crossfade">Crossfade (Fundido cruzado)</option>
+                    </select>
+                </div>
+                <div class="upload-field-group">
+                    <label for="images">Imágenes</label>
+                    <div class="custom-file-input">
+                        <input type="file" id="images" name="images" accept="image/*" multiple required />
+                        <label for="images" class="custom-file-label">Seleccionar imágenes</label>
+                        <div class="custom-file-name" id="images-file-name"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="upload-btn-row upload-btn-centered">
+                <button type="submit">Generar video</button>
+            </div>
+        </form>
+    </section>
+</div>
+
+<section class="panel">
+    <h2>Envío masivo de video</h2>
+    {% if devices %}
+    <form action="/devices/deploy-upload" method="post" enctype="multipart/form-data" class="bulk-send-form">
+        <div class="bulk-header-row">
+            <label class="bulk-file-col">Video a enviar
+                <div class="custom-file-input">
+                    <input id="bulk-video-input" type="file" name="video" accept="video/*" required />
+                    <label for="bulk-video-input" class="custom-file-label">Seleccionar video</label>
+                    <div class="custom-file-name" id="bulk-video-file-name"></div>
+                </div>
+            </label>
+            <div class="bulk-preview-col">
+                <video id="bulk-video-preview" class="preview" controls preload="metadata"
+                    style="display:none;"></video>
+            </div>
+        </div>
+
+        <p class="mini-label">Seleccioná destino</p>
+        <button type="button" class="select-all-btn" id="bulk-select-all-btn">Seleccionar todas</button>
+
+        <table class="devices-table bulk-devices-table">
+            <thead>
+                <tr>
+                    <th class="device-col-select">Selec.</th>
+                    <th>Destino</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for device in devices %}
+                <tr>
+                    <td data-label="Selección masiva">
+                        <input type="checkbox" class="bulk-device" name="device_ids" value="{{ device.id }}" checked />
+                    </td>
+                    <td data-label="Destino">{{ device.name }} ({{ device.host }})</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <div class="device-bulk-actions">
+            <span class="mini-label">Acción sobre la selección:</span>
+            <div class="device-bulk-buttons">
+                <button type="submit" class="bulk-submit">Enviar video seleccionado</button>
+            </div>
+        </div>
+    </form>
+    {% else %}
+    <p>No hay dispositivos disponibles para envío.</p>
+    {% endif %}
+</section>
+
+<section class="panel">
+    <h2>Dispositivos</h2>
+    {% if devices %}
+    <p class="mini-label">Seleccioná por fila qué equipos entran en las acciones masivas o usá los controles
+        individuales.</p>
+
+    <table class="devices-table">
+        <thead>
+            <tr>
+                <th class="device-col-select">Selec.</th>
+                <th>Nombre</th>
+                {% if is_admin %}
+                <th>Host/IP</th>
+                <th style="display:none;">Usuario</th>
+                <th>Dueño</th>
+                <th style="display:none;">Ruta remota</th>
+                {% endif %}
+                <th>Info</th>
+                <th>Contenido</th>
+                <th>Control</th>
+                {% if is_admin %}
+                <th>Acciones</th>
+                {% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for device in devices %}
+            <tr>
+                <td data-label="Selección masiva">
+                    <input type="checkbox" class="device-mass-checkbox" name="device_ids" value="{{ device.id }}"
+                        form="device-bulk-form" checked />
+                </td>
+                <td data-label="Nombre">{{ device.name }}</td>
+                {% if is_admin %}
+                <td data-label="Host/IP">{{ device.host }}:{{ device.port }}{% if device.host_lan %} <span
+                        style="font-size:0.75em;color:#888;" title="IP LAN fallback">(LAN: {{ device.host_lan
+                        }})</span>{% endif %}</td>
+                <td data-label="Usuario" style="display:none;">{{ device.user }}</td>
+                <td data-label="Dueño">{{ device.owner_username or "Sin asignar" }}</td>
+                <td data-label="Ruta remota" style="display:none;">{{ device.remote_path }}/{{ device.remote_filename }}
+                </td>
+                {% endif %}
+                <td data-label="Info">
+                    <button type="button" class="btn-device-info action-btn" data-device-id="{{ device.id }}"
+                        data-device-name="{{ device.name }}">+ Info</button>
+                    <button type="button" class="btn-device-log action-btn" data-device-id="{{ device.id }}"
+                        data-device-name="{{ device.name }}">Ver log</button>
+                    <button type="button" class="btn-device-radio action-btn" data-device-id="{{ device.id }}"
+                        data-device-name="{{ device.name }}">Radio</button>
+                    <button type="button" class="btn-device-normalizer action-btn" data-device-id="{{ device.id }}"
+                        data-device-name="{{ device.name }}">Normalizador</button>
+                </td>
+                <td data-label="Contenido">
+                    <button type="button" class="btn-view-files action-btn" data-device-id="{{ device.id }}"
+                        data-device-name="{{ device.name }}">Ver contenido</button>
+                </td>
+                <td data-label="Control">
+                    <div class="device-row-controls">
+                        <form action="/devices/{{ device.id }}/reload-service" method="post">
+                            <button type="submit" class="action-btn">Reiniciar servicio video</button>
+                        </form>
+                        <form action="/devices/{{ device.id }}/reboot" method="post">
+                            <button type="submit" class="danger action-btn">Reiniciar</button>
+                        </form>
+                    </div>
+                </td>
+                {% if is_admin %}
+                <td data-label="Acciones">
+                    <button type="button" class="btn-edit-device action-btn"
+                        data-device-id="{{ device.id }}">Editar</button>
+                    <form action="/devices/{{ device.id }}/delete" method="post" class="delete-form">
+                        <button class="danger action-btn" type="submit">Eliminar</button>
+                    </form>
+                </td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <form id="device-bulk-form" method="post"></form>
+    <div class="device-bulk-actions">
+        <span class="mini-label">Acciones masivas sobre la selección:</span>
+        <div class="device-bulk-buttons">
+            <button type="submit" form="device-bulk-form" formaction="/devices/reboot-all">Reiniciar
+                seleccionadas</button>
+            <button type="submit" form="device-bulk-form" formaction="/devices/reload-service-all">Reiniciar servicio
+                seleccionadas</button>
+        </div>
+    </div>
+    {% else %}
+    <p>No hay dispositivos cargados.</p>
+    {% endif %}
+</section>
+
+<section class="panel">
+    <h2>📅 Programación de Contenido</h2>
+    <p class="mini-label">Programá qué contenido se reproduce en cada horario y día de la semana</p>
+    <div class="schedule-info-box">
+        <p><strong>ℹ️ Cómo funciona:</strong></p>
+        <ul>
+            <li><strong>Video específico:</strong> Reproduce un video local durante el horario programado</li>
+            <li><strong>Transmisión en directo:</strong> Conecta a un stream de YouTube/RTMP. Ejemplo:
+                <code>https://youtu.be/Is0yasFyVmM</code>
+            </li>
+            <li><strong>Loop todos los videos:</strong> Reproduce todos los videos locales en bucle</li>
+            <li>⚙️ <strong>Finalización automática:</strong> Cuando termina el horario programado, vuelve
+                automáticamente al contenido local por defecto</li>
+        </ul>
+    </div>
+
+    {% if can_manage_schedules %}
+    <form action="/schedules/add" method="post" class="schedule-form">
+        <div class="schedule-form-grid">
+            <label>Dispositivo
+                <select name="device_id" required>
+                    <option value="">Seleccionar dispositivo</option>
+                    {% for device in devices %}
+                    <option value="{{ device.id }}">{{ device.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+
+            <label>Tipo de contenido
+                <select name="content_type" id="schedule-content-type" required onchange="toggleContentReference()">
+                    <option value="video">🎥 Video específico</option>
+                    <option value="loop_all">🔄 Loop todos los videos</option>
+                    <option value="livestream">📡 Transmisión en directo (YouTube/RTMP)</option>
+                </select>
+            </label>
+
+            <label id="content-reference-label">Video/Stream URL
+                <input type="text" name="content_reference" id="schedule-content-reference"
+                    placeholder="Ej: VidLoop.mp4 o https://youtu.be/Is0yasFyVmM" />
+                <small class="field-hint" id="content-hint">Ingresá el nombre del archivo o la URL completa del
+                    stream</small>
+            </label>
+
+            <label>Hora inicio
+                <input type="text" name="time_start" class="time-input-24h" placeholder="HH:MM"
+                    pattern="([01]\d|2[0-3]):[0-5]\d" maxlength="5" required />
+            </label>
+
+            <label>Hora fin
+                <input type="text" name="time_end" class="time-input-24h" placeholder="HH:MM"
+                    pattern="([01]\d|2[0-3]):[0-5]\d" maxlength="5" required />
+            </label>
+
+            <div class="days-section">
+                <div class="days-header">
+                    <span class="days-title">Días de la semana</span>
+                    <div class="days-toggle-btns">
+                        <button type="button" class="btn-toggle-days" onclick="toggleAllDays(this, true)">Todos</button>
+                        <button type="button" class="btn-toggle-days"
+                            onclick="toggleAllDays(this, false)">Ninguno</button>
+                    </div>
+                </div>
+                <div class="days-checkboxes">
+                    <label class="day-checkbox"><input type="checkbox" name="day_mon" value="1"
+                            checked /><span>Lun</span></label>
+                    <label class="day-checkbox"><input type="checkbox" name="day_tue" value="1"
+                            checked /><span>Mar</span></label>
+                    <label class="day-checkbox"><input type="checkbox" name="day_wed" value="1"
+                            checked /><span>Mié</span></label>
+                    <label class="day-checkbox"><input type="checkbox" name="day_thu" value="1"
+                            checked /><span>Jue</span></label>
+                    <label class="day-checkbox"><input type="checkbox" name="day_fri" value="1"
+                            checked /><span>Vie</span></label>
+                    <label class="day-checkbox"><input type="checkbox" name="day_sat" value="1"
+                            checked /><span>Sáb</span></label>
+                    <label class="day-checkbox"><input type="checkbox" name="day_sun" value="1"
+                            checked /><span>Dom</span></label>
+                </div>
+            </div>
+        </div>
+
+        <button type="submit" class="btn-add-schedule">Agregar Programación</button>
+    </form>
+    {% endif %}
+
+    {% if schedules %}
+    <table class="schedules-table">
+        <thead>
+            <tr>
+                <th>Dispositivo</th>
+                <th>Contenido</th>
+                <th>Horario</th>
+                <th>Días</th>
+                <th>Estado</th>
+                {% if can_manage_schedules %}
+                <th>Acciones</th>
+                {% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for schedule in schedules %}
+            <tr class="{% if not schedule.enabled %}schedule-disabled{% endif %}">
+                <td data-label="Dispositivo">{{ schedule.device_name or "Desconocido" }}</td>
+                <td data-label="Contenido">
+                    {% if schedule.content_type == "video" %}
+                    🎥 {{ schedule.content_reference or "Video" }}
+                    {% elif schedule.content_type == "livestream" %}
+                    📡 Stream: {{ schedule.content_reference }}
+                    {% elif schedule.content_type == "loop_all" %}
+                    🔄 Loop todos los videos
+                    {% else %}
+                    {{ schedule.content_type }}
+                    {% endif %}
+                </td>
+                <td data-label="Horario">{{ schedule.time_start }} - {{ schedule.time_end }}</td>
+                <td data-label="Días">{{ schedule.days_of_week }}</td>
+                <td data-label="Estado">
+                    <span class="badge {% if schedule.enabled %}badge-ok{% else %}badge-warn{% endif %}">
+                        {{ "Activa" if schedule.enabled else "Inactiva" }}
+                    </span>
+                </td>
+                {% if can_manage_schedules %}
+                <td data-label="Acciones" class="schedule-actions">
+                    <button type="button" class="mini-btn btn-edit-schedule" data-schedule-id="{{ schedule.id }}"
+                        data-device-id="{{ schedule.device_id }}" data-content-type="{{ schedule.content_type }}"
+                        data-content-reference="{{ schedule.content_reference or '' }}"
+                        data-time-start="{{ schedule.time_start }}" data-time-end="{{ schedule.time_end }}"
+                        data-days="{{ schedule.days_of_week }}">
+                        Editar
+                    </button>
+                    <form action="/schedules/{{ schedule.id }}/toggle" method="post" style="display:inline;">
+                        <input type="hidden" name="enabled" value="{{ '0' if schedule.enabled else '1' }}" />
+                        <button type="submit" class="mini-btn">{{ "Desactivar" if schedule.enabled else "Activar"
+                            }}</button>
+                    </form>
+                    <form action="/schedules/{{ schedule.id }}/delete" method="post" style="display:inline;"
+                        onsubmit="return confirm('¿Eliminar esta programación?');">
+                        <button type="submit" class="mini-btn danger">Eliminar</button>
+                    </form>
+                </td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No hay programaciones configuradas aún.</p>
+    {% endif %}
+</section>
+
+<!-- Modal para editar programación -->
+<div id="schedule-edit-modal" class="modal-backdrop" style="display:none;">
+    <div class="modal-card">
+        <div class="modal-head">
+            <h3>Editar Programación</h3>
+            <button type="button" class="modal-close" onclick="closeScheduleEditModal()">✕</button>
+        </div>
+        <form id="schedule-edit-form" method="post" class="schedule-form" style="margin-top:0.75rem;">
+            <div class="schedule-form-grid">
+                <label>Dispositivo
+                    <select name="device_id" required>
+                        <option value="">Seleccionar dispositivo</option>
+                        {% for device in devices %}
+                        <option value="{{ device.id }}">{{ device.name }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+
+                <label>Tipo de contenido
+                    <select name="content_type" id="edit-content-type" required onchange="toggleEditContentReference()">
+                        <option value="video">🎥 Video específico</option>
+                        <option value="loop_all">🔄 Loop todos los videos</option>
+                        <option value="livestream">📡 Transmisión en directo (YouTube/RTMP)</option>
+                    </select>
+                </label>
+
+                <label id="edit-content-reference-label">Video/Stream URL
+                    <input type="text" name="content_reference" id="edit-content-reference"
+                        placeholder="Ej: VidLoop.mp4 o https://youtu.be/Is0yasFyVmM" />
+                    <small class="field-hint" id="edit-content-hint">Ingresá el nombre del archivo o la URL completa del
+                        stream</small>
+                </label>
+
+                <label>Hora inicio
+                    <input type="text" name="time_start" class="time-input-24h" placeholder="HH:MM"
+                        pattern="([01]\d|2[0-3]):[0-5]\d" maxlength="5" required />
+                </label>
+
+                <label>Hora fin
+                    <input type="text" name="time_end" class="time-input-24h" placeholder="HH:MM"
+                        pattern="([01]\d|2[0-3]):[0-5]\d" maxlength="5" required />
+                </label>
+
+                <div class="days-section">
+                    <div class="days-header">
+                        <span class="days-title">Días de la semana</span>
+                        <div class="days-toggle-btns">
+                            <button type="button" class="btn-toggle-days"
+                                onclick="toggleAllDays(this, true)">Todos</button>
+                            <button type="button" class="btn-toggle-days"
+                                onclick="toggleAllDays(this, false)">Ninguno</button>
+                        </div>
+                    </div>
+                    <div class="days-checkboxes">
+                        <label class="day-checkbox"><input type="checkbox" name="day_mon"
+                                value="1" /><span>Lun</span></label>
+                        <label class="day-checkbox"><input type="checkbox" name="day_tue"
+                                value="1" /><span>Mar</span></label>
+                        <label class="day-checkbox"><input type="checkbox" name="day_wed"
+                                value="1" /><span>Mié</span></label>
+                        <label class="day-checkbox"><input type="checkbox" name="day_thu"
+                                value="1" /><span>Jue</span></label>
+                        <label class="day-checkbox"><input type="checkbox" name="day_fri"
+                                value="1" /><span>Vie</span></label>
+                        <label class="day-checkbox"><input type="checkbox" name="day_sat"
+                                value="1" /><span>Sáb</span></label>
+                        <label class="day-checkbox"><input type="checkbox" name="day_sun"
+                                value="1" /><span>Dom</span></label>
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit">Guardar Cambios</button>
+        </form>
+    </div>
+</div>
+
+{% if is_admin %}
+<section class="panel">
+    <h2>Usuarios</h2>
+    <form action="/users/add" method="post" class="grid">
+        <label>Usuario <input type="text" name="username" required /></label>
+        <label>Contraseña <input type="text" name="password" required /></label>
+        <label>Rol
+            <select name="role">
+                <option value="operator">Operador</option>
+                <option value="admin">Administrador</option>
+            </select>
+        </label>
+        <button type="submit">Agregar usuario</button>
+    </form>
+
+    {% if users %}
+    <table>
+        <thead>
+            <tr>
+                <th>Usuario</th>
+                <th>Rol</th>
+                <th>Creado</th>
+                <th>Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in users %}
+            <tr>
+                <td>{{ user.username }}</td>
+                <td>{{ user.role }}</td>
+                <td>{{ user.created_at }}</td>
+                <td>
+                    <button type="button" class="btn-edit-user mini-btn" data-user-id="{{ user.id }}"
+                        data-username="{{ user.username }}" data-role="{{ user.role }}">Editar</button>
+                    <form action="/users/{{ user.id }}/delete" method="post" style="display:inline;">
+                        <button type="submit" class="mini-btn danger"
+                            onclick="return confirm('¿Eliminar usuario {{ user.username }}?');">Eliminar</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div id="user-edit-modal" class="modal-backdrop" style="display:none;">
+        <div class="modal-card">
+            <div class="modal-head">
+                <h3 id="user-edit-title">Editar usuario</h3>
+                <button type="button" class="modal-close" onclick="closeUserEditModal()">✕</button>
+            </div>
+            <form id="user-edit-form" method="post" class="grid" style="margin-top:0.75rem;">
+                <input type="hidden" name="user_id" />
+                <label>Usuario <input type="text" name="username" required /></label>
+                <label>Rol
+                    <select name="role">
+                        <option value="operator">Operador</option>
+                        <option value="admin">Administrador</option>
+                    </select>
+                </label>
+                <label>Nueva contraseña <input type="text" name="password"
+                        placeholder="Dejar vacío para no cambiar" /></label>
+                <button type="submit">Guardar cambios</button>
+            </form>
+        </div>
+    </div>
+    {% else %}
+    <p>No hay usuarios cargados.</p>
+    {% endif %}
+</section>
+{% endif %}
+
+<div id="rpi-files-modal" class="modal-backdrop" style="display:none;">
+    <div class="modal-card modal-large">
+        <div class="modal-head">
+            <h3 id="rpi-files-title">Contenido RPi</h3>
+            <button type="button" class="modal-close" onclick="closeRpiFilesModal()">✕</button>
+        </div>
+        <div id="rpi-files-body">Cargando...</div>
+        <div class="modal-actions">
+            <button type="button" onclick="closeRpiFilesModal()">Cerrar</button>
+        </div>
+    </div>
+</div>
+
+<div id="device-info-modal" class="modal-backdrop" style="display:none;">
+    <div class="modal-card">
+        <div class="modal-head">
+            <h3 id="device-info-title">Info RPi</h3>
+            <button type="button" class="modal-close" onclick="closeDeviceInfoModal()">✕</button>
+        </div>
+        <div id="device-info-body">Cargando...</div>
+        <div class="modal-actions">
+            <button type="button" onclick="closeDeviceInfoModal()">Cerrar</button>
+        </div>
+    </div>
+</div>
+
+<div id="device-log-modal" class="modal-backdrop" style="display:none;">
+    <div class="modal-card modal-large">
+        <div class="modal-head">
+            <h3 id="device-log-title">Log de dispositivo</h3>
+            <button type="button" class="modal-close" onclick="closeDeviceLogModal()">✕</button>
+        </div>
+        <div class="modal-actions" style="justify-content:flex-start; gap:0.5rem; margin-bottom:0.5rem;">
+            <button type="button" id="device-log-refresh-btn">Refrescar</button>
+        </div>
+        <div id="device-log-meta" class="mini-label"></div>
+        <pre id="device-log-body" class="log-console">Cargando...</pre>
+        <div class="modal-actions">
+            <button type="button" onclick="closeDeviceLogModal()">Cerrar</button>
+        </div>
+    </div>
+</div>
+
+<div id="device-radio-modal" class="modal-backdrop" style="display:none;">
+    <div class="modal-card modal-large">
+        <div class="modal-head">
+            <h3 id="device-radio-title">Radio del dispositivo</h3>
+            <button type="button" class="modal-close" onclick="closeDeviceRadioModal()">✕</button>
+        </div>
+
+        <div id="device-radio-warning" class="warn-text" style="display:none;"></div>
+
+        <form id="device-radio-form" class="grid" style="margin-top:0.75rem;" onsubmit="return false;">
+            <label>Activar radio
+                <input type="checkbox" id="radio-enabled" />
+            </label>
+
+            <label>Modo
+                <select id="radio-mode">
+                    <option value="vidloop">Radio VIDLOOP (local + jingles/pitidos)</option>
+                    <option value="stream">Stream central (URL base + overlay)</option>
+                    <option value="link">Link (mpv/yt-dlp)</option>
+                </select>
+            </label>
+
+            <label>Stream URL (modo stream)
+                <input type="text" id="radio-stream-url" placeholder="Ej: https://mi-servidor/stream" />
+            </label>
+
+            <label>Link URL (modo link)
+                <input type="text" id="radio-link-url" placeholder="Ej: https://youtu.be/xxxxx" />
+            </label>
+
+            <label>Jingle cada (min)
+                <input type="number" id="radio-jingle-every" min="0" max="1440" value="0" />
+            </label>
+
+            <label>Pitido cada (min)
+                <input type="number" id="radio-beep-interval" min="0" max="1440" value="0" />
+            </label>
+        </form>
+
+        <div class="modal-actions" style="display:flex; gap:0.5rem; flex-wrap:wrap; justify-content:flex-start;">
+            <button type="button" id="radio-apply-btn">Aplicar y reiniciar</button>
+            <button type="button" id="radio-restart-btn">Reiniciar radio</button>
+            <button type="button" id="radio-refresh-btn">Refrescar estado</button>
+        </div>
+
+        <div id="device-radio-status" class="mini-label" style="margin-top:0.6rem;"></div>
+        <pre id="device-radio-logs" class="log-console" style="margin-top:0.6rem;">Cargando...</pre>
+
+        <div class="modal-actions">
+            <button type="button" onclick="closeDeviceRadioModal()">Cerrar</button>
+        </div>
+    </div>
+</div>
+
+<div id="device-normalizer-modal" class="modal-backdrop" style="display:none;">
+    <div class="modal-card modal-large">
+        <div class="modal-head">
+            <h3 id="device-normalizer-title">Normalizador del dispositivo</h3>
+            <button type="button" class="modal-close" onclick="closeDeviceNormalizerModal()">✕</button>
+        </div>
+
+        <div id="device-normalizer-warning" class="warn-text" style="display:none;"></div>
+
+        <div class="modal-actions" style="display:flex; gap:0.5rem; flex-wrap:wrap; justify-content:flex-start;">
+            <button type="button" id="normalizer-run-btn">Ejecutar ahora</button>
+            <button type="button" id="normalizer-refresh-btn">Refrescar estado</button>
+        </div>
+
+        <div id="device-normalizer-status" class="mini-label" style="margin-top:0.6rem;"></div>
+        <pre id="device-normalizer-logs" class="log-console" style="margin-top:0.6rem;">Cargando...</pre>
+
+        <div class="modal-actions">
+            <button type="button" onclick="closeDeviceNormalizerModal()">Cerrar</button>
+        </div>
+    </div>
+</div>
+
+<div id="device-edit-modal" class="modal-backdrop" style="display:none;">
+    <div class="modal-card">
+        <div class="modal-head">
+            <h3 id="device-edit-title">Editar dispositivo</h3>
+            <button type="button" class="modal-close" onclick="closeDeviceEditModal()">✕</button>
+        </div>
+        <form id="device-edit-form" method="post" class="grid" style="margin-top:0.75rem;">
+            <label>Nombre <input type="text" name="name" required /></label>
+            <label>Host/IP VPN <input type="text" name="host" required /></label>
+            <label title="Si la VPN cae, el sistema intenta esta IP automáticamente">IP LAN (fallback) <input
+                    type="text" name="host_lan" /></label>
+            <label>Puerto <input type="number" name="port" required /></label>
+            <label>Usuario <input type="text" name="user" required /></label>
+            <label>Contraseña SSH <input type="password" name="ssh_password"
+                    placeholder="Dejar vacío para mantener" /></label>
+            <label>Usuario dueño
+                <select name="owner_user_id" id="device-edit-owner">
+                    <option value="">Sin asignar</option>
+                    {% for owner in users %}
+                    <option value="{{ owner.id }}">{{ owner.username }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>Ruta remota <input type="text" name="remote_path" required /></label>
+            <label>Nombre archivo remoto <input type="text" name="remote_filename" value="VIDLOOP.mp4" /></label>
+            <label>Comando reinicio servicio <input type="text" name="restart_cmd" /></label>
+            <button type="submit">Guardar cambios</button>
+        </form>
+    </div>
+</div>
+
+<!-- Modal para vista previa de video -->
+<div id="video-preview-modal" class="modal-backdrop" style="display:none;" onclick="closeVideoPreviewModal(event)">
+    <div class="modal-card modal-video" onclick="event.stopPropagation()">
+        <div class="modal-head">
+            <h3 id="video-preview-title">Vista previa</h3>
+            <button type="button" class="modal-close" onclick="closeVideoPreviewModal()">✕</button>
+        </div>
+        <div class="video-preview-container">
+            <video id="video-preview-player" controls preload="metadata"
+                style="width:100%; border-radius:10px; background:#000;">
+                <source id="video-preview-source" src="" type="video/mp4" />
+            </video>
+        </div>
+    </div>
+</div>
+
+<div id="visible-devices-data" data-devices="{{ devices | tojson | forceescape }}" style="display:none;"></div>
+
+<script>
+    function toggleAllDays(btn, checked) {
+        const container = btn.closest('.days-section').querySelector('.days-checkboxes');
+        container.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = checked);
+    }
+
+    document.querySelectorAll('.time-input-24h').forEach(input => {
+        input.addEventListener('input', function (e) {
+            let v = this.value.replace(/[^\d]/g, '');
+            if (v.length >= 3) v = v.slice(0, 2) + ':' + v.slice(2);
+            this.value = v;
+        });
+        input.addEventListener('blur', function () {
+            const m = this.value.match(/^(\d{1,2}):(\d{2})$/);
+            if (m) this.value = m[1].padStart(2, '0') + ':' + m[2];
+        });
+    });
+
+    const maintenanceForm = document.getElementById("maintenance-form");
+    if (maintenanceForm) {
+        maintenanceForm.onsubmit = event => event.preventDefault();
+        const saveMaintenanceBtn = document.getElementById("save-maintenance");
+        saveMaintenanceBtn.onclick = async () => {
+            const enabled = document.getElementById("maintenance-enabled").checked;
+            const message = document.getElementById("maintenance-message").value;
+            const response = await fetch("/admin/maintenance", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ enabled, message })
+            });
+            const statusNode = document.getElementById("maintenance-status");
+            if (response.ok) {
+                const data = await response.json();
+                if (window.applyHeaderStatus) {
+                    window.applyHeaderStatus(!!data.enabled, data.message || "");
+                }
+                statusNode.textContent = "Guardado!";
+                statusNode.style.display = "inline";
+                setTimeout(() => (statusNode.style.display = "none"), 1800);
+            } else {
+                statusNode.textContent = "Error al guardar";
+                statusNode.style.display = "inline";
+                setTimeout(() => (statusNode.style.display = "none"), 2500);
+            }
+        };
+    }
+
+    function closeRpiFilesModal() {
+        document.getElementById("rpi-files-modal").style.display = "none";
+    }
+
+    function closeUserEditModal() {
+        document.getElementById("user-edit-modal").style.display = "none";
+    }
+
+    function closeDeviceInfoModal() {
+        document.getElementById("device-info-modal").style.display = "none";
+    }
+
+    function closeDeviceEditModal() {
+        document.getElementById("device-edit-modal").style.display = "none";
+    }
+
+    function closeDeviceLogModal() {
+        document.getElementById("device-log-modal").style.display = "none";
+    }
+
+    function closeDeviceRadioModal() {
+        document.getElementById("device-radio-modal").style.display = "none";
+    }
+
+    function closeDeviceNormalizerModal() {
+        document.getElementById("device-normalizer-modal").style.display = "none";
+    }
+
+    // Funciones para modal de vista previa de video
+    function showVideoPreview(videoUrl, filename) {
+        const modal = document.getElementById("video-preview-modal");
+        const player = document.getElementById("video-preview-player");
+        const source = document.getElementById("video-preview-source");
+        const title = document.getElementById("video-preview-title");
+
+        title.textContent = `Vista previa: ${filename}`;
+        source.src = videoUrl;
+        player.load();
+        modal.style.display = "block";
+
+        // Prevenir scroll en el body
+        document.body.style.overflow = "hidden";
+    }
+
+    function closeVideoPreviewModal(event) {
+        // Si se hace clic en el backdrop o en el botón cerrar
+        if (!event || event.target.id === "video-preview-modal" || event.target.classList.contains("modal-close")) {
+            const modal = document.getElementById("video-preview-modal");
+            const player = document.getElementById("video-preview-player");
+            player.pause();
+            modal.style.display = "none";
+
+            // Restaurar scroll del body
+            document.body.style.overflow = "";
+        }
+    }
+
+    function formatUptimeEs(uptime) {
+        if (!uptime || typeof uptime !== "string") return uptime;
+        const normalized = uptime.replace(/^up\s+/, "");
+        return normalized
+            .replace(/\bday\b/g, "día")
+            .replace(/\bdays\b/g, "días")
+            .replace(/\bhour\b/g, "hora")
+            .replace(/\bhours\b/g, "horas")
+            .replace(/\bminute\b/g, "minuto")
+            .replace(/\bminutes\b/g, "minutos");
+    }
+
+    function escapeHtml(value) {
+        return String(value)
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
+    }
+
+    function fmtBytes(n) {
+        if (n < 1024) return `${n} B`;
+        if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+        if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+        return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    }
+
+    let activeFilesDeviceId = null;
+    let activeFilesList = [];
+    const visibleDevicesDataNode = document.getElementById("visible-devices-data");
+    const visibleDevices = visibleDevicesDataNode ? JSON.parse(visibleDevicesDataNode.dataset.devices || "[]") : [];
+
+    function setVideoPreview(inputId, videoId) {
+        const input = document.getElementById(inputId);
+        const preview = document.getElementById(videoId);
+        if (!input || !preview) return;
+        const file = input.files?.[0];
+        if (!file) {
+            preview.pause();
+            preview.removeAttribute("src");
+            preview.style.display = "none";
+            return;
+        }
+        const objectUrl = URL.createObjectURL(file);
+        preview.src = objectUrl;
+        preview.style.display = "block";
+        preview.onloadeddata = () => URL.revokeObjectURL(objectUrl);
+    }
+
+    function moveFile(fromIndex, toIndex) {
+        if (toIndex < 0 || toIndex >= activeFilesList.length) return;
+        const copy = [...activeFilesList];
+        const [item] = copy.splice(fromIndex, 1);
+        copy.splice(toIndex, 0, item);
+        activeFilesList = copy;
+        renderFilesModal();
+    }
+
+    async function saveFilesOrder() {
+        if (!activeFilesDeviceId || activeFilesList.length <= 1) return;
+        const body = document.getElementById("rpi-files-body");
+        body.innerHTML = "<p>Guardando orden...</p>";
+
+        const res = await fetch(`/api/devices/${encodeURIComponent(activeFilesDeviceId)}/files/reorder`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ filenames: activeFilesList.map(file => file.name) })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+            body.innerHTML = `<p style="color:#ff6b6b;">${escapeHtml(data.error || "No se pudo guardar el orden")}</p>`;
+            return;
+        }
+        await refreshFilesModal();
+    }
+
+    async function deleteRemoteFile(filename) {
+        if (!activeFilesDeviceId) return;
+        if (!confirm(`Eliminar ${filename}?`)) return;
+
+        const formData = new FormData();
+        formData.append("filename", filename);
+        const res = await fetch(`/api/devices/${encodeURIComponent(activeFilesDeviceId)}/files/delete`, {
+            method: "POST",
+            body: formData
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+            alert(data.error || "No se pudo eliminar");
+            return;
+        }
+        await refreshFilesModal();
+    }
+
+    function deleteRemoteFileByIndex(index) {
+        const row = activeFilesList[index];
+        if (!row) return;
+        deleteRemoteFile(row.name);
+    }
+
+    async function uploadRemoteVideo() {
+        if (!activeFilesDeviceId) return;
+        const input = document.getElementById("device-video-upload");
+        const file = input?.files?.[0];
+        if (!file) {
+            alert("Seleccioná un video primero");
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append("file", file);
+        const res = await fetch(`/api/devices/${encodeURIComponent(activeFilesDeviceId)}/files/upload`, {
+            method: "POST",
+            body: formData
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+            alert(data.error || "No se pudo subir el archivo");
+            return;
+        }
+        input.value = "";
+        await refreshFilesModal();
+    }
+
+    function targetDevicesHtml() {
+        const options = visibleDevices
+            .filter(device => String(device.id) !== String(activeFilesDeviceId))
+            .map(device => `<label><input type="checkbox" class="dup-target" value="${device.id}" /> ${escapeHtml(device.name)} (${escapeHtml(device.host)})</label>`)
+            .join("");
+        return options || "<p>No hay otras RPIs visibles para duplicar.</p>";
+    }
+
+    async function duplicateSelectedVideo() {
+        if (!activeFilesDeviceId) return;
+        const sourceSelect = document.getElementById("dup-source-file");
+        const filename = sourceSelect?.value;
+        if (!filename) {
+            alert("Seleccioná un video origen");
+            return;
+        }
+
+        const targetIds = Array.from(document.querySelectorAll(".dup-target:checked")).map(cb => Number(cb.value));
+        if (!targetIds.length) {
+            alert("Seleccioná al menos una RPi destino");
+            return;
+        }
+
+        const res = await fetch(`/api/devices/${encodeURIComponent(activeFilesDeviceId)}/files/duplicate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ filename, target_device_ids: targetIds })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+            alert(data.error || "No se pudo duplicar el archivo");
+            return;
+        }
+        alert("Archivo duplicado correctamente");
+    }
+
+    function renderFilesModal() {
+        const body = document.getElementById("rpi-files-body");
+        const hasMany = activeFilesList.length > 1;
+        const rows = activeFilesList.map((file, index) => `
+            <tr>
+                <td>${escapeHtml(file.name)}</td>
+                <td>${fmtBytes(file.size_bytes)}</td>
+                <td>${escapeHtml(file.modified)}</td>
+                <td class="files-actions-col">
+                    <button type="button" class="mini-btn" ${index === 0 ? "disabled" : ""} onclick="moveFile(${index}, ${index - 1})">↑</button>
+                    <button type="button" class="mini-btn" ${index === activeFilesList.length - 1 ? "disabled" : ""} onclick="moveFile(${index}, ${index + 1})">↓</button>
+                    <button type="button" class="mini-btn danger" onclick="deleteRemoteFileByIndex(${index})">Eliminar</button>
+                </td>
+            </tr>
+        `).join("");
+
+        body.innerHTML = `
+            <div class="files-toolbar">
+                <div class="custom-file-input">
+                    <input id="device-video-upload" type="file" accept="video/*" />
+                    <label for="device-video-upload" class="custom-file-label">Seleccionar video</label>
+                    <div class="custom-file-name" id="device-video-file-name"></div>
+                </div>
+                <button type="button" onclick="uploadRemoteVideo()">Agregar video</button>
+                <button type="button" onclick="refreshFilesModal()">Refrescar</button>
+                ${hasMany ? '<button type="button" onclick="saveFilesOrder()">Guardar orden</button>' : ''}
+            </div>
+            <video id="device-video-preview" class="preview" controls preload="metadata" style="display:none;margin-bottom:0.7rem;"></video>
+            <div class="dup-wrap">
+                <label>Duplicar archivo
+                    <select id="dup-source-file">
+                        ${activeFilesList.map(file => `<option value="${escapeHtml(file.name)}">${escapeHtml(file.name)}</option>`).join("")}
+                    </select>
+                </label>
+                <div class="dup-targets">${targetDevicesHtml()}</div>
+                <button type="button" onclick="duplicateSelectedVideo()">Duplicar a estas RPIs</button>
+            </div>
+            ${activeFilesList.length === 0
+                ? '<p>Sin archivos en la carpeta remota.</p>'
+                : `<table class="files-table"><thead><tr><th>Archivo</th><th>Tamaño</th><th>Modificado</th><th>Acciones</th></tr></thead><tbody>${rows}</tbody></table>`}
+        `;
+
+        const uploadInput = document.getElementById("device-video-upload");
+        if (uploadInput) {
+            uploadInput.addEventListener("change", () => {
+                setVideoPreview("device-video-upload", "device-video-preview");
+                // Configurar el display del nombre del archivo
+                const nameDisplay = document.getElementById('device-video-file-name');
+                const container = uploadInput.closest('.custom-file-input');
+                if (uploadInput.files && uploadInput.files.length > 0 && nameDisplay) {
+                    nameDisplay.textContent = uploadInput.files[0].name;
+                    container?.classList.add('has-file');
+                } else if (nameDisplay) {
+                    nameDisplay.textContent = '';
+                    container?.classList.remove('has-file');
+                }
+            });
+        }
+    }
+
+    async function refreshFilesModal() {
+        if (!activeFilesDeviceId) return;
+        const body = document.getElementById("rpi-files-body");
+        body.innerHTML = "Cargando...";
+
+        const res = await fetch(`/api/devices/${encodeURIComponent(activeFilesDeviceId)}/files`);
+        const data = await res.json();
+
+        if (!res.ok || !data.ok) {
+            body.innerHTML = `<p style="color:#ff6b6b;">${escapeHtml(data.error || "Error consultando archivos")}</p>`;
+            return;
+        }
+
+        activeFilesList = Array.isArray(data.files) ? data.files : [];
+        renderFilesModal();
+    }
+
+    function renderInfoPretty(info) {
+        const rawStatus = String(info?.status || "Desconocido");
+        const online = rawStatus.toLowerCase() === "online";
+        const status = online ? "En línea" : rawStatus;
+        const statusClass = online ? "badge badge-ok" : "badge badge-warn";
+        return `
+            <div class="info-grid">
+                <div class="info-item"><span class="info-k">Estado</span><span class="${statusClass}">${escapeHtml(status)}</span></div>
+                <div class="info-item"><span class="info-k">Temperatura</span><span class="info-v">${escapeHtml(info?.temperature || "--")}</span></div>
+                <div class="info-item"><span class="info-k">Tiempo encendido</span><span class="info-v">${escapeHtml(formatUptimeEs(info?.uptime || "--"))}</span></div>
+                <div class="info-item"><span class="info-k">Último check</span><span class="info-v">${escapeHtml(info?.last_check || "--")}</span></div>
+                <div class="info-item"><span class="info-k">Servicio</span><span class="info-v">${escapeHtml(info?.video_service || "video_looper")}</span></div>
+                <div class="info-item"><span class="info-k">Ruta video</span><span class="info-v">${escapeHtml(info?.video_path || "--")}</span></div>
+            </div>
+        `;
+    }
+
+    let activeRadioDeviceId = null;
+    let activeNormalizerDeviceId = null;
+
+    function renderServiceBadge(text) {
+        const value = String(text || "unknown").toLowerCase();
+        const ok = value === "active";
+        const label = ok ? "Activa" : (value === "inactive" ? "Inactiva" : String(text || "Desconocida"));
+        const cls = ok ? "badge badge-ok" : "badge badge-warn";
+        return `<span class="${cls}">${escapeHtml(label)}</span>`;
+    }
+
+    async function refreshDeviceRadioModal() {
+        if (!activeRadioDeviceId) return;
+        const warn = document.getElementById("device-radio-warning");
+        const status = document.getElementById("device-radio-status");
+        const logs = document.getElementById("device-radio-logs");
+
+        warn.style.display = "none";
+        warn.textContent = "";
+        status.textContent = "";
+        logs.textContent = "Cargando...";
+
+        try {
+            const res = await fetch(`/api/devices/${encodeURIComponent(activeRadioDeviceId)}/radio`);
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+                logs.textContent = data.error || "No se pudo consultar radio";
+                return;
+            }
+
+            const cfg = data.config || {};
+            document.getElementById("radio-enabled").checked = !!cfg.enabled;
+            document.getElementById("radio-mode").value = cfg.mode || "vidloop";
+            document.getElementById("radio-stream-url").value = cfg.stream_url || "";
+            document.getElementById("radio-link-url").value = cfg.link_url || "";
+            document.getElementById("radio-jingle-every").value = Number(cfg.jingle_every || 0);
+            document.getElementById("radio-beep-interval").value = Number(cfg.beep_interval_min || 0);
+
+            if (data.installed === false) {
+                warn.textContent = "Radio no detectada en este dispositivo (puede faltar instalación o permisos sudo).";
+                warn.style.display = "block";
+            }
+
+            const svc = data.service || {};
+            status.innerHTML = `Servicio: ${escapeHtml(svc.name || 'vidloop-radio')} | Estado: ${renderServiceBadge(svc.active)} | Enabled: ${escapeHtml(svc.enabled || 'unknown')}`;
+            logs.textContent = data.logs || "(sin logs)";
+        } catch (error) {
+            logs.textContent = `Error de red: ${error}`;
+        }
+    }
+
+    async function applyDeviceRadioConfig() {
+        if (!activeRadioDeviceId) return;
+        const warn = document.getElementById("device-radio-warning");
+        const status = document.getElementById("device-radio-status");
+        const logs = document.getElementById("device-radio-logs");
+
+        warn.style.display = "none";
+        warn.textContent = "";
+        status.textContent = "";
+        logs.textContent = "Aplicando...";
+
+        const payload = {
+            enabled: document.getElementById("radio-enabled").checked,
+            mode: document.getElementById("radio-mode").value,
+            stream_url: document.getElementById("radio-stream-url").value,
+            link_url: document.getElementById("radio-link-url").value,
+            jingle_every: Number(document.getElementById("radio-jingle-every").value || 0),
+            beep_interval_min: Number(document.getElementById("radio-beep-interval").value || 0),
+        };
+
+        try {
+            const res = await fetch(`/api/devices/${encodeURIComponent(activeRadioDeviceId)}/radio`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+                warn.textContent = data.error || "No se pudo aplicar configuración";
+                warn.style.display = "block";
+                logs.textContent = "";
+                return;
+            }
+            await refreshDeviceRadioModal();
+        } catch (error) {
+            warn.textContent = `Error de red: ${error}`;
+            warn.style.display = "block";
+            logs.textContent = "";
+        }
+    }
+
+    async function restartDeviceRadio() {
+        if (!activeRadioDeviceId) return;
+        const warn = document.getElementById("device-radio-warning");
+        const logs = document.getElementById("device-radio-logs");
+
+        warn.style.display = "none";
+        warn.textContent = "";
+        logs.textContent = "Reiniciando...";
+
+        try {
+            const res = await fetch(`/api/devices/${encodeURIComponent(activeRadioDeviceId)}/radio/restart`, {
+                method: "POST",
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+                warn.textContent = data.error || "No se pudo reiniciar";
+                warn.style.display = "block";
+                logs.textContent = "";
+                return;
+            }
+            await refreshDeviceRadioModal();
+        } catch (error) {
+            warn.textContent = `Error de red: ${error}`;
+            warn.style.display = "block";
+            logs.textContent = "";
+        }
+    }
+
+    async function refreshDeviceNormalizerModal() {
+        if (!activeNormalizerDeviceId) return;
+        const warn = document.getElementById("device-normalizer-warning");
+        const status = document.getElementById("device-normalizer-status");
+        const logs = document.getElementById("device-normalizer-logs");
+
+        warn.style.display = "none";
+        warn.textContent = "";
+        status.textContent = "";
+        logs.textContent = "Cargando...";
+
+        try {
+            const res = await fetch(`/api/devices/${encodeURIComponent(activeNormalizerDeviceId)}/normalizer`);
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+                logs.textContent = data.error || "No se pudo consultar normalizador";
+                return;
+            }
+
+            if (data.installed === false) {
+                warn.textContent = "Normalizador no detectado en este dispositivo (puede faltar instalación o permisos sudo).";
+                warn.style.display = "block";
+            }
+
+            const svc = data.service || {};
+            const tmr = data.timer || {};
+            status.innerHTML = `Service: ${escapeHtml(svc.name || 'vidloop-media-normalizer.service')} | Estado: ${renderServiceBadge(svc.active)} | Enabled: ${escapeHtml(svc.enabled || 'unknown')}<br>`
+                + `Timer: ${escapeHtml(tmr.name || 'vidloop-media-normalizer.timer')} | Estado: ${renderServiceBadge(tmr.active)} | Enabled: ${escapeHtml(tmr.enabled || 'unknown')}`;
+            logs.textContent = data.logs || "(sin logs)";
+        } catch (error) {
+            logs.textContent = `Error de red: ${error}`;
+        }
+    }
+
+    async function runDeviceNormalizerNow() {
+        if (!activeNormalizerDeviceId) return;
+        const warn = document.getElementById("device-normalizer-warning");
+        const logs = document.getElementById("device-normalizer-logs");
+
+        warn.style.display = "none";
+        warn.textContent = "";
+        logs.textContent = "Ejecutando...";
+
+        try {
+            const res = await fetch(`/api/devices/${encodeURIComponent(activeNormalizerDeviceId)}/normalizer/run`, {
+                method: "POST",
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+                warn.textContent = data.error || "No se pudo ejecutar";
+                warn.style.display = "block";
+                logs.textContent = "";
+                return;
+            }
+            await refreshDeviceNormalizerModal();
+        } catch (error) {
+            warn.textContent = `Error de red: ${error}`;
+            warn.style.display = "block";
+            logs.textContent = "";
+        }
+    }
+
+    document.querySelectorAll(".btn-edit-user").forEach(btn => {
+        btn.addEventListener("click", () => {
+            const userId = btn.dataset.userId;
+            const username = btn.dataset.username;
+            const role = btn.dataset.role;
+            const modal = document.getElementById("user-edit-modal");
+            const formNode = document.getElementById("user-edit-form");
+            formNode.action = `/users/${encodeURIComponent(userId)}/edit`;
+            formNode.elements.user_id.value = userId;
+            formNode.elements.username.value = username;
+            formNode.elements.role.value = role;
+            formNode.elements.password.value = "";
+            modal.style.display = "block";
+        });
+    });
+
+    document.querySelectorAll(".btn-device-info").forEach(btn => {
+        btn.addEventListener("click", async () => {
+            const deviceId = btn.dataset.deviceId;
+            const deviceName = btn.dataset.deviceName;
+            const modal = document.getElementById("device-info-modal");
+            const title = document.getElementById("device-info-title");
+            const body = document.getElementById("device-info-body");
+
+            title.textContent = `+ Info de ${deviceName}`;
+            body.innerHTML = "Cargando...";
+            modal.style.display = "block";
+
+            try {
+                const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/info`);
+                const data = await res.json();
+
+                if (!res.ok || !data.ok) {
+                    body.innerHTML = `<p style="color:#ff6b6b;">${escapeHtml(data.detail || data.error || "Error consultando info")}</p>`;
+                    return;
+                }
+
+                body.innerHTML = `${data.warning ? `<p class="warn-text">${escapeHtml(data.warning)}</p>` : ""}${renderInfoPretty(data.info)}`;
+            } catch (error) {
+                body.innerHTML = `<p style="color:#ff6b6b;">Error de red: ${escapeHtml(error)}</p>`;
+            }
+        });
+    });
+
+    let activeLogDeviceId = null;
+
+    async function refreshDeviceLogModal() {
+        if (!activeLogDeviceId) return;
+        const body = document.getElementById("device-log-body");
+        const meta = document.getElementById("device-log-meta");
+        body.textContent = "Cargando...";
+        meta.textContent = "";
+
+        try {
+            const res = await fetch(`/api/devices/${encodeURIComponent(activeLogDeviceId)}/logs?lines=250`);
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+                body.textContent = data.error || "No se pudo leer el log";
+                return;
+            }
+            meta.textContent = `Fuente: ${data.log_path || "desconocida"}`;
+            body.textContent = data.content || "(sin contenido)";
+        } catch (error) {
+            body.textContent = `Error de red: ${error}`;
+        }
+    }
+
+    document.querySelectorAll(".btn-device-log").forEach(btn => {
+        btn.addEventListener("click", async () => {
+            const deviceId = btn.dataset.deviceId;
+            const deviceName = btn.dataset.deviceName;
+            activeLogDeviceId = deviceId;
+
+            const modal = document.getElementById("device-log-modal");
+            const title = document.getElementById("device-log-title");
+            title.textContent = `Log de ${deviceName}`;
+            modal.style.display = "block";
+            await refreshDeviceLogModal();
+        });
+    });
+
+    document.querySelectorAll(".btn-device-radio").forEach(btn => {
+        btn.addEventListener("click", async () => {
+            const deviceId = btn.dataset.deviceId;
+            const deviceName = btn.dataset.deviceName;
+            activeRadioDeviceId = deviceId;
+
+            const modal = document.getElementById("device-radio-modal");
+            const title = document.getElementById("device-radio-title");
+            title.textContent = `Radio de ${deviceName}`;
+            modal.style.display = "block";
+            await refreshDeviceRadioModal();
+        });
+    });
+
+    document.querySelectorAll(".btn-device-normalizer").forEach(btn => {
+        btn.addEventListener("click", async () => {
+            const deviceId = btn.dataset.deviceId;
+            const deviceName = btn.dataset.deviceName;
+            activeNormalizerDeviceId = deviceId;
+
+            const modal = document.getElementById("device-normalizer-modal");
+            const title = document.getElementById("device-normalizer-title");
+            title.textContent = `Normalizador de ${deviceName}`;
+            modal.style.display = "block";
+            await refreshDeviceNormalizerModal();
+        });
+    });
+
+    const radioApplyBtn = document.getElementById("radio-apply-btn");
+    if (radioApplyBtn) radioApplyBtn.addEventListener("click", applyDeviceRadioConfig);
+    const radioRestartBtn = document.getElementById("radio-restart-btn");
+    if (radioRestartBtn) radioRestartBtn.addEventListener("click", restartDeviceRadio);
+    const radioRefreshBtn = document.getElementById("radio-refresh-btn");
+    if (radioRefreshBtn) radioRefreshBtn.addEventListener("click", refreshDeviceRadioModal);
+
+    const normalizerRunBtn = document.getElementById("normalizer-run-btn");
+    if (normalizerRunBtn) normalizerRunBtn.addEventListener("click", runDeviceNormalizerNow);
+    const normalizerRefreshBtn = document.getElementById("normalizer-refresh-btn");
+    if (normalizerRefreshBtn) normalizerRefreshBtn.addEventListener("click", refreshDeviceNormalizerModal);
+
+    const logRefreshBtn = document.getElementById("device-log-refresh-btn");
+    if (logRefreshBtn) {
+        logRefreshBtn.addEventListener("click", refreshDeviceLogModal);
+    }
+
+    document.querySelectorAll(".btn-view-files").forEach(btn => {
+        btn.addEventListener("click", async () => {
+            const deviceId = btn.dataset.deviceId;
+            const deviceName = btn.dataset.deviceName;
+            const modal = document.getElementById("rpi-files-modal");
+            const title = document.getElementById("rpi-files-title");
+            const body = document.getElementById("rpi-files-body");
+
+            activeFilesDeviceId = deviceId;
+            title.textContent = `Contenido en ${deviceName}`;
+            body.innerHTML = "Cargando...";
+            modal.style.display = "block";
+
+            try {
+                await refreshFilesModal();
+            } catch (error) {
+                body.innerHTML = `<p style="color:#ff6b6b;">Error de red: ${escapeHtml(error)}</p>`;
+            }
+        });
+    });
+
+    const bulkVideoInput = document.getElementById("bulk-video-input");
+    if (bulkVideoInput) {
+        bulkVideoInput.addEventListener("change", () => setVideoPreview("bulk-video-input", "bulk-video-preview"));
+    }
+
+    const bulkSelectAllBtn = document.getElementById("bulk-select-all-btn");
+    if (bulkSelectAllBtn) {
+        function updateBulkSelectAllText() {
+            const checkboxes = document.querySelectorAll(".bulk-device");
+            const allChecked = Array.from(checkboxes).length > 0 && Array.from(checkboxes).every(cb => cb.checked);
+            bulkSelectAllBtn.textContent = allChecked ? "Deseleccionar todas" : "Seleccionar todas";
+        }
+
+        bulkSelectAllBtn.addEventListener("click", () => {
+            const checkboxes = document.querySelectorAll(".bulk-device");
+            const allChecked = Array.from(checkboxes).length > 0 && Array.from(checkboxes).every(cb => cb.checked);
+            checkboxes.forEach(cb => {
+                cb.checked = !allChecked;
+            });
+            updateBulkSelectAllText();
+        });
+
+        document.querySelectorAll(".bulk-device").forEach(cb => {
+            cb.addEventListener("change", updateBulkSelectAllText);
+        });
+
+        updateBulkSelectAllText();
+    }
+
+    document.querySelectorAll(".btn-edit-device").forEach(btn => {
+        btn.addEventListener("click", () => {
+            const deviceId = btn.dataset.deviceId;
+            const device = visibleDevices.find(d => String(d.id) === String(deviceId));
+            if (!device) return;
+
+            const modal = document.getElementById("device-edit-modal");
+            const title = document.getElementById("device-edit-title");
+            const formNode = document.getElementById("device-edit-form");
+
+            title.textContent = `Editar ${device.name}`;
+            formNode.action = `/devices/${encodeURIComponent(deviceId)}/update`;
+            formNode.elements.name.value = device.name || "";
+            formNode.elements.host.value = device.host || "";
+            if (formNode.elements.host_lan) formNode.elements.host_lan.value = device.host_lan || "";
+            formNode.elements.port.value = device.port || 22;
+            formNode.elements.user.value = device.user || "";
+            formNode.elements.ssh_password.value = "";
+            formNode.elements.remote_path.value = device.remote_path || "";
+            formNode.elements.remote_filename.value = device.remote_filename || "content.mp4";
+            formNode.elements.restart_cmd.value = device.restart_cmd || "";
+
+            const ownerSelect = formNode.elements.owner_user_id;
+            if (ownerSelect) {
+                const ownerId = device.owner_user_id != null ? String(device.owner_user_id) : "";
+                Array.from(ownerSelect.options).forEach(opt => {
+                    opt.selected = opt.value === ownerId;
+                });
+            }
+
+            modal.style.display = "block";
+        });
+    });
+
+    // Función para seleccionar/deseleccionar todas las RPIs en la columna Enviar
+    function toggleDeployDevices(button) {
+        const form = button.closest('form');
+        const checkboxes = form.querySelectorAll('.deploy-device-list input[type="checkbox"]');
+        const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+
+        checkboxes.forEach(cb => {
+            cb.checked = !allChecked;
+        });
+
+        button.textContent = allChecked ? 'Seleccionar todas' : 'Deseleccionar todas';
+    }
+
+    // Manejar inputs de archivo personalizados
+    function setupFileInput(inputId, nameDisplayId) {
+        const input = document.getElementById(inputId);
+        const nameDisplay = document.getElementById(nameDisplayId);
+        const container = input?.closest('.custom-file-input');
+
+        if (!input || !nameDisplay) return;
+
+        input.addEventListener('change', function () {
+            if (this.files && this.files.length > 0) {
+                if (this.files.length === 1) {
+                    nameDisplay.textContent = this.files[0].name;
+                } else {
+                    nameDisplay.textContent = `${this.files.length} archivos seleccionados`;
+                }
+                container?.classList.add('has-file');
+            } else {
+                nameDisplay.textContent = '';
+                container?.classList.remove('has-file');
+            }
+        });
+    }
+
+    // Función para mostrar/ocultar contraseña
+    function togglePasswordVisibility(inputId, button) {
+        const input = document.getElementById(inputId);
+        const eyeIcon = button.querySelector('.eye-icon');
+
+        if (input.type === 'password') {
+            input.type = 'text';
+            eyeIcon.textContent = '👁️‍🗨️';
+        } else {
+            input.type = 'password';
+            eyeIcon.textContent = '👁️';
+        }
+    }
+
+    // Configurar los inputs de archivo en la carga inicial
+    setupFileInput('images', 'images-file-name');
+    setupFileInput('bulk-video-input', 'bulk-video-file-name');
+    // El tercer input (device-video-upload) se configura en renderFilesModal()
+
+    // Formatear fechas en la tabla de historial
+    function formatDateCell() {
+        document.querySelectorAll('.date-cell').forEach(cell => {
+            const timestamp = cell.dataset.timestamp;
+            if (timestamp) {
+                try {
+                    const date = new Date(timestamp);
+                    const day = String(date.getDate()).padStart(2, '0');
+                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                    const year = date.getFullYear();
+                    const hours = String(date.getHours()).padStart(2, '0');
+                    const minutes = String(date.getMinutes()).padStart(2, '0');
+                    const seconds = String(date.getSeconds()).padStart(2, '0');
+
+                    cell.textContent = `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+                } catch (e) {
+                    console.error('Error al formatear fecha:', e);
+                }
+            }
+        });
+    }
+
+    // ============================================================================
+    // Funciones para Programación / Schedules
+    // ============================================================================
+
+    function toggleContentReference() {
+        const contentType = document.getElementById('schedule-content-type').value;
+        const refLabel = document.getElementById('content-reference-label');
+        const refInput = document.getElementById('schedule-content-reference');
+        const hint = document.getElementById('content-hint');
+
+        if (contentType === 'loop_all') {
+            refLabel.style.display = 'none';
+            refInput.required = false;
+            refInput.value = '';
+        } else {
+            refLabel.style.display = 'block';
+            refInput.required = true;
+            if (contentType === 'video') {
+                refInput.placeholder = 'Ej: VidLoop.mp4';
+                if (hint) hint.textContent = 'Ingresá el nombre exacto del archivo de video local';
+            } else if (contentType === 'livestream') {
+                refInput.placeholder = 'Ej: https://youtu.be/Is0yasFyVmM';
+                if (hint) hint.textContent = 'Pegá la URL completa de YouTube (youtu.be/xxx o youtube.com/watch?v=xxx) o RTMP';
+            }
+        }
+    }
+
+    function toggleEditContentReference() {
+        const contentType = document.getElementById('edit-content-type').value;
+        const refLabel = document.getElementById('edit-content-reference-label');
+        const refInput = document.getElementById('edit-content-reference');
+        const hint = document.getElementById('edit-content-hint');
+
+        if (contentType === 'loop_all') {
+            refLabel.style.display = 'none';
+            refInput.required = false;
+            refInput.value = '';
+        } else {
+            refLabel.style.display = 'block';
+            refInput.required = true;
+            if (contentType === 'video') {
+                refInput.placeholder = 'Ej: VidLoop.mp4';
+                if (hint) hint.textContent = 'Ingresá el nombre exacto del archivo de video local';
+            } else if (contentType === 'livestream') {
+                refInput.placeholder = 'Ej: https://youtu.be/Is0yasFyVmM';
+                if (hint) hint.textContent = 'Pegá la URL completa de YouTube (youtu.be/xxx o youtube.com/watch?v=xxx) o RTMP';
+            }
+        }
+    }
+
+    function closeScheduleEditModal() {
+        document.getElementById('schedule-edit-modal').style.display = 'none';
+    }
+
+    // Interceptar envío del formulario de agregar programación para convertir días
+    const scheduleForm = document.querySelector('form[action="/schedules/add"]');
+    if (scheduleForm) {
+        scheduleForm.addEventListener('submit', function (e) {
+            const days = [];
+            const dayNames = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+            const dayInputs = ['day_mon', 'day_tue', 'day_wed', 'day_thu', 'day_fri', 'day_sat', 'day_sun'];
+
+            dayInputs.forEach((inputName, index) => {
+                const checkbox = scheduleForm.querySelector(`input[name="${inputName}"]`);
+                if (checkbox && checkbox.checked) {
+                    days.push(dayNames[index]);
+                }
+            });
+
+            if (days.length === 0) {
+                e.preventDefault();
+                alert('Seleccioná al menos un día de la semana');
+                return;
+            }
+
+            // Crear campo oculto con los días concatenados
+            const existingDaysInput = scheduleForm.querySelector('input[name="days_of_week"]');
+            if (existingDaysInput) {
+                existingDaysInput.remove();
+            }
+
+            const daysInput = document.createElement('input');
+            daysInput.type = 'hidden';
+            daysInput.name = 'days_of_week';
+            daysInput.value = days.join(', ');
+            scheduleForm.appendChild(daysInput);
+        });
+    }
+
+    // Botones de editar programación
+    document.querySelectorAll('.btn-edit-schedule').forEach(btn => {
+        btn.addEventListener('click', function () {
+            const scheduleId = this.dataset.scheduleId;
+            const deviceId = this.dataset.deviceId;
+            const contentType = this.dataset.contentType;
+            const contentRef = this.dataset.contentReference;
+            const timeStart = this.dataset.timeStart;
+            const timeEnd = this.dataset.timeEnd;
+            const daysStr = this.dataset.days;
+
+            const modal = document.getElementById('schedule-edit-modal');
+            const form = document.getElementById('schedule-edit-form');
+
+            form.action = `/schedules/${scheduleId}/update`;
+            form.querySelector('select[name="device_id"]').value = deviceId;
+            form.querySelector('select[name="content_type"]').value = contentType;
+            form.querySelector('input[name="content_reference"]').value = contentRef;
+            form.querySelector('input[name="time_start"]').value = timeStart;
+            form.querySelector('input[name="time_end"]').value = timeEnd;
+
+            // Parsear días y marcar checkboxes
+            const dayNames = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+            const dayInputs = ['day_mon', 'day_tue', 'day_wed', 'day_thu', 'day_fri', 'day_sat', 'day_sun'];
+            const selectedDays = daysStr.split(',').map(d => d.trim());
+
+            dayInputs.forEach((inputName, index) => {
+                const checkbox = form.querySelector(`input[name="${inputName}"]`);
+                if (checkbox) {
+                    checkbox.checked = selectedDays.includes(dayNames[index]);
+                }
+            });
+
+            toggleEditContentReference();
+            modal.style.display = 'block';
+        });
+    });
+
+    // Interceptar envío del formulario de editar
+    const editForm = document.getElementById('schedule-edit-form');
+    if (editForm) {
+        editForm.addEventListener('submit', function (e) {
+            const days = [];
+            const dayNames = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+            const dayInputs = ['day_mon', 'day_tue', 'day_wed', 'day_thu', 'day_fri', 'day_sat', 'day_sun'];
+
+            dayInputs.forEach((inputName, index) => {
+                const checkbox = editForm.querySelector(`input[name="${inputName}"]`);
+                if (checkbox && checkbox.checked) {
+                    days.push(dayNames[index]);
+                }
+            });
+
+            if (days.length === 0) {
+                e.preventDefault();
+                alert('Seleccioná al menos un día de la semana');
+                return;
+            }
+
+            // Crear campo oculto con los días concatenados
+            const existingDaysInput = editForm.querySelector('input[name="days_of_week"]');
+            if (existingDaysInput) {
+                existingDaysInput.remove();
+            }
+
+            const daysInput = document.createElement('input');
+            daysInput.type = 'hidden';
+            daysInput.name = 'days_of_week';
+            daysInput.value = days.join(', ');
+            editForm.appendChild(daysInput);
+        });
+    }
+
+    // Ejecutar al cargar la página
+    formatDateCell();
+</script>
+{% endblock %}
