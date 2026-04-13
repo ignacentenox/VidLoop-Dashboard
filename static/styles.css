@@ -2538,3 +2538,266 @@ body.darkmode .field-hint {
     white-space: pre-wrap;
     word-break: break-word;
 }
+
+/* ===== Responsive and contrast fixes ===== */
+body {
+    --text: var(--ink);
+    --line: #efe3d6;
+    --surface-soft: #fff7f1;
+}
+
+body.darkmode {
+    --text: var(--ink);
+    --line: rgba(255, 255, 255, 0.08);
+    --surface-soft: #1b1d21;
+}
+
+.panel,
+.panel h2,
+.panel p,
+.panel li,
+.panel label,
+.mini-label,
+.field-hint,
+.devices-table,
+.devices-table th,
+.devices-table td,
+.schedules-table,
+.schedules-table th,
+.schedules-table td,
+.inventory-table,
+.inventory-table th,
+.inventory-table td {
+    color: var(--text);
+}
+
+.devices-table th,
+.schedules-table th,
+.inventory-table th {
+    color: #695f57;
+    font-size: 0.84rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.devices-table tbody tr,
+.schedules-table tbody tr {
+    transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.devices-table tbody tr:hover,
+.schedules-table tbody tr:hover {
+    background: rgba(255, 247, 241, 0.78);
+}
+
+.device-bulk-actions,
+.device-bulk-form,
+.device-check-grid,
+.upload-form-custom,
+.schedule-info-box {
+    background: var(--surface-soft);
+    color: var(--text);
+}
+
+.action-btn,
+.device-row-controls button,
+.device-bulk-buttons button,
+.bulk-submit,
+.ghost-link-btn {
+    min-height: 42px;
+}
+
+.files-toolbar button,
+.inventory-toolbar-actions button,
+.days-toggle-btns button {
+    min-height: 40px;
+}
+
+body.darkmode .devices-table tbody tr:hover,
+body.darkmode .schedules-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+body.darkmode .device-bulk-actions,
+body.darkmode .device-bulk-form,
+body.darkmode .device-check-grid,
+body.darkmode .upload-form-custom,
+body.darkmode .schedule-info-box {
+    background: var(--surface-soft);
+}
+
+body.darkmode .devices-table th,
+body.darkmode .schedules-table th,
+body.darkmode .inventory-table th,
+body.darkmode .devices-table td::before,
+body.darkmode .schedules-table td::before {
+    color: #c2c9d2;
+}
+
+body.darkmode .files-toolbar input[type="file"] {
+    background: rgba(255, 255, 255, 0.06);
+    color: #f5f5f5;
+}
+
+@media (max-width: 920px) {
+    .container {
+        padding: 0 1rem;
+    }
+
+    .devices-table,
+    .schedules-table {
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+
+    .devices-table thead,
+    .schedules-table thead {
+        display: none;
+    }
+
+    .devices-table tbody,
+    .devices-table tr,
+    .devices-table td,
+    .schedules-table tbody,
+    .schedules-table tr,
+    .schedules-table td {
+        display: block;
+        width: 100%;
+    }
+
+    .devices-table tr,
+    .schedules-table tr {
+        background: #ffffff;
+        color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        box-shadow: 0 10px 18px rgba(35, 24, 12, 0.08);
+        padding: 0.75rem 0.9rem;
+        margin-bottom: 0.9rem;
+    }
+
+    body.darkmode .devices-table tr,
+    body.darkmode .schedules-table tr {
+        background: #23262d;
+        border-color: var(--line);
+        box-shadow: 0 10px 22px rgba(0, 0, 0, 0.28);
+    }
+
+    .devices-table td,
+    .schedules-table td {
+        border-bottom: 1px dashed var(--line);
+        padding: 0.62rem 0;
+        color: var(--text);
+    }
+
+    .devices-table td:last-child,
+    .schedules-table td:last-child {
+        border-bottom: none;
+    }
+
+    .devices-table td::before,
+    .schedules-table td::before {
+        content: attr(data-label);
+        display: block;
+        margin-bottom: 0.32rem;
+        font-size: 0.77rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        color: #766b63;
+    }
+
+    .device-row-controls,
+    .device-row-controls form,
+    .device-bulk-buttons,
+    .device-bulk-buttons button,
+    .files-toolbar,
+    .files-toolbar button,
+    .inventory-toolbar-actions,
+    .inventory-toolbar-actions button,
+    .bulk-header-row,
+    .days-header,
+    .schedule-actions {
+        width: 100%;
+    }
+
+    .admin-panel-grid,
+    .admin-fields-row,
+    .bulk-header-row,
+    .files-toolbar,
+    .inventory-toolbar,
+    .inventory-toolbar-actions,
+    .device-bulk-actions,
+    .device-bulk-buttons,
+    .days-header,
+    .schedule-actions,
+    .footer-inner {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .admin-panel-section {
+        min-width: 0;
+        max-width: none;
+        width: 100%;
+    }
+
+    .header-side,
+    .session-card,
+    .header-card,
+    .bulk-preview-col,
+    .bulk-preview-col .preview,
+    .inventory-search-wrap,
+    .ghost-link-btn,
+    .action-btn,
+    .device-row-controls button,
+    .device-bulk-buttons button,
+    .files-toolbar button,
+    .inventory-toolbar-actions button,
+    .days-toggle-btns button {
+        width: 100%;
+    }
+
+    .site-header {
+        padding: 1.5rem 0 1rem;
+    }
+
+    .panel {
+        padding: 1.15rem 1rem;
+        margin-bottom: 1.4rem;
+    }
+
+    .device-bulk-actions {
+        padding: 1rem;
+        border-radius: 14px;
+    }
+
+    .days-toggle-btns {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.45rem;
+    }
+}
+
+@media (max-width: 640px) {
+    .site-header h1 {
+        font-size: 1.8rem;
+    }
+
+    .header-value {
+        font-size: 1.35rem;
+    }
+
+    .bulk-header-row .bulk-preview-col {
+        flex: 1 1 auto;
+        justify-content: stretch;
+    }
+
+    .days-checkboxes {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .inventory-summary-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
