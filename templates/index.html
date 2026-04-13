@@ -9,6 +9,11 @@
         <h2>Monitoreá, creá y desplegá contenido en segundos</h2>
         <p class="lead">Subí imágenes, generá videos y administrá todo desde un solo panel.</p>
     </div>
+    {% if is_admin %}
+    <div class="hero-actions">
+        <a href="/admin/ip-dashboard" class="ghost-link-btn">Ver inventario de IPs</a>
+    </div>
+    {% endif %}
 </section>
 
 <div class="admin-panel-grid">
@@ -202,10 +207,6 @@
                         data-device-name="{{ device.name }}">+ Info</button>
                     <button type="button" class="btn-device-log action-btn" data-device-id="{{ device.id }}"
                         data-device-name="{{ device.name }}">Ver log</button>
-                    <button type="button" class="btn-device-radio action-btn" data-device-id="{{ device.id }}"
-                        data-device-name="{{ device.name }}">Radio</button>
-                    <button type="button" class="btn-device-normalizer action-btn" data-device-id="{{ device.id }}"
-                        data-device-name="{{ device.name }}">Normalizador</button>
                 </td>
                 <td data-label="Contenido">
                     <button type="button" class="btn-view-files action-btn" data-device-id="{{ device.id }}"
@@ -590,83 +591,6 @@
     </div>
 </div>
 
-<div id="device-radio-modal" class="modal-backdrop" style="display:none;">
-    <div class="modal-card modal-large">
-        <div class="modal-head">
-            <h3 id="device-radio-title">Radio del dispositivo</h3>
-            <button type="button" class="modal-close" onclick="closeDeviceRadioModal()">✕</button>
-        </div>
-
-        <div id="device-radio-warning" class="warn-text" style="display:none;"></div>
-
-        <form id="device-radio-form" class="grid" style="margin-top:0.75rem;" onsubmit="return false;">
-            <label>Activar radio
-                <input type="checkbox" id="radio-enabled" />
-            </label>
-
-            <label>Modo
-                <select id="radio-mode">
-                    <option value="vidloop">Radio VIDLOOP (local + jingles/pitidos)</option>
-                    <option value="stream">Stream central (URL base + overlay)</option>
-                    <option value="link">Link (mpv/yt-dlp)</option>
-                </select>
-            </label>
-
-            <label>Stream URL (modo stream)
-                <input type="text" id="radio-stream-url" placeholder="Ej: https://mi-servidor/stream" />
-            </label>
-
-            <label>Link URL (modo link)
-                <input type="text" id="radio-link-url" placeholder="Ej: https://youtu.be/xxxxx" />
-            </label>
-
-            <label>Jingle cada (min)
-                <input type="number" id="radio-jingle-every" min="0" max="1440" value="0" />
-            </label>
-
-            <label>Pitido cada (min)
-                <input type="number" id="radio-beep-interval" min="0" max="1440" value="0" />
-            </label>
-        </form>
-
-        <div class="modal-actions" style="display:flex; gap:0.5rem; flex-wrap:wrap; justify-content:flex-start;">
-            <button type="button" id="radio-apply-btn">Aplicar y reiniciar</button>
-            <button type="button" id="radio-restart-btn">Reiniciar radio</button>
-            <button type="button" id="radio-refresh-btn">Refrescar estado</button>
-        </div>
-
-        <div id="device-radio-status" class="mini-label" style="margin-top:0.6rem;"></div>
-        <pre id="device-radio-logs" class="log-console" style="margin-top:0.6rem;">Cargando...</pre>
-
-        <div class="modal-actions">
-            <button type="button" onclick="closeDeviceRadioModal()">Cerrar</button>
-        </div>
-    </div>
-</div>
-
-<div id="device-normalizer-modal" class="modal-backdrop" style="display:none;">
-    <div class="modal-card modal-large">
-        <div class="modal-head">
-            <h3 id="device-normalizer-title">Normalizador del dispositivo</h3>
-            <button type="button" class="modal-close" onclick="closeDeviceNormalizerModal()">✕</button>
-        </div>
-
-        <div id="device-normalizer-warning" class="warn-text" style="display:none;"></div>
-
-        <div class="modal-actions" style="display:flex; gap:0.5rem; flex-wrap:wrap; justify-content:flex-start;">
-            <button type="button" id="normalizer-run-btn">Ejecutar ahora</button>
-            <button type="button" id="normalizer-refresh-btn">Refrescar estado</button>
-        </div>
-
-        <div id="device-normalizer-status" class="mini-label" style="margin-top:0.6rem;"></div>
-        <pre id="device-normalizer-logs" class="log-console" style="margin-top:0.6rem;">Cargando...</pre>
-
-        <div class="modal-actions">
-            <button type="button" onclick="closeDeviceNormalizerModal()">Cerrar</button>
-        </div>
-    </div>
-</div>
-
 <div id="device-edit-modal" class="modal-backdrop" style="display:none;">
     <div class="modal-card">
         <div class="modal-head">
@@ -781,14 +705,6 @@
 
     function closeDeviceLogModal() {
         document.getElementById("device-log-modal").style.display = "none";
-    }
-
-    function closeDeviceRadioModal() {
-        document.getElementById("device-radio-modal").style.display = "none";
-    }
-
-    function closeDeviceNormalizerModal() {
-        document.getElementById("device-normalizer-modal").style.display = "none";
     }
 
     // Funciones para modal de vista previa de video
@@ -1075,186 +991,12 @@
         `;
     }
 
-    let activeRadioDeviceId = null;
-    let activeNormalizerDeviceId = null;
-
     function renderServiceBadge(text) {
         const value = String(text || "unknown").toLowerCase();
         const ok = value === "active";
         const label = ok ? "Activa" : (value === "inactive" ? "Inactiva" : String(text || "Desconocida"));
         const cls = ok ? "badge badge-ok" : "badge badge-warn";
         return `<span class="${cls}">${escapeHtml(label)}</span>`;
-    }
-
-    async function refreshDeviceRadioModal() {
-        if (!activeRadioDeviceId) return;
-        const warn = document.getElementById("device-radio-warning");
-        const status = document.getElementById("device-radio-status");
-        const logs = document.getElementById("device-radio-logs");
-
-        warn.style.display = "none";
-        warn.textContent = "";
-        status.textContent = "";
-        logs.textContent = "Cargando...";
-
-        try {
-            const res = await fetch(`/api/devices/${encodeURIComponent(activeRadioDeviceId)}/radio`);
-            const data = await res.json();
-            if (!res.ok || !data.ok) {
-                logs.textContent = data.error || "No se pudo consultar radio";
-                return;
-            }
-
-            const cfg = data.config || {};
-            document.getElementById("radio-enabled").checked = !!cfg.enabled;
-            document.getElementById("radio-mode").value = cfg.mode || "vidloop";
-            document.getElementById("radio-stream-url").value = cfg.stream_url || "";
-            document.getElementById("radio-link-url").value = cfg.link_url || "";
-            document.getElementById("radio-jingle-every").value = Number(cfg.jingle_every || 0);
-            document.getElementById("radio-beep-interval").value = Number(cfg.beep_interval_min || 0);
-
-            if (data.installed === false) {
-                warn.textContent = "Radio no detectada en este dispositivo (puede faltar instalación o permisos sudo).";
-                warn.style.display = "block";
-            }
-
-            const svc = data.service || {};
-            status.innerHTML = `Servicio: ${escapeHtml(svc.name || 'vidloop-radio')} | Estado: ${renderServiceBadge(svc.active)} | Enabled: ${escapeHtml(svc.enabled || 'unknown')}`;
-            logs.textContent = data.logs || "(sin logs)";
-        } catch (error) {
-            logs.textContent = `Error de red: ${error}`;
-        }
-    }
-
-    async function applyDeviceRadioConfig() {
-        if (!activeRadioDeviceId) return;
-        const warn = document.getElementById("device-radio-warning");
-        const status = document.getElementById("device-radio-status");
-        const logs = document.getElementById("device-radio-logs");
-
-        warn.style.display = "none";
-        warn.textContent = "";
-        status.textContent = "";
-        logs.textContent = "Aplicando...";
-
-        const payload = {
-            enabled: document.getElementById("radio-enabled").checked,
-            mode: document.getElementById("radio-mode").value,
-            stream_url: document.getElementById("radio-stream-url").value,
-            link_url: document.getElementById("radio-link-url").value,
-            jingle_every: Number(document.getElementById("radio-jingle-every").value || 0),
-            beep_interval_min: Number(document.getElementById("radio-beep-interval").value || 0),
-        };
-
-        try {
-            const res = await fetch(`/api/devices/${encodeURIComponent(activeRadioDeviceId)}/radio`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
-            });
-            const data = await res.json();
-            if (!res.ok || !data.ok) {
-                warn.textContent = data.error || "No se pudo aplicar configuración";
-                warn.style.display = "block";
-                logs.textContent = "";
-                return;
-            }
-            await refreshDeviceRadioModal();
-        } catch (error) {
-            warn.textContent = `Error de red: ${error}`;
-            warn.style.display = "block";
-            logs.textContent = "";
-        }
-    }
-
-    async function restartDeviceRadio() {
-        if (!activeRadioDeviceId) return;
-        const warn = document.getElementById("device-radio-warning");
-        const logs = document.getElementById("device-radio-logs");
-
-        warn.style.display = "none";
-        warn.textContent = "";
-        logs.textContent = "Reiniciando...";
-
-        try {
-            const res = await fetch(`/api/devices/${encodeURIComponent(activeRadioDeviceId)}/radio/restart`, {
-                method: "POST",
-            });
-            const data = await res.json();
-            if (!res.ok || !data.ok) {
-                warn.textContent = data.error || "No se pudo reiniciar";
-                warn.style.display = "block";
-                logs.textContent = "";
-                return;
-            }
-            await refreshDeviceRadioModal();
-        } catch (error) {
-            warn.textContent = `Error de red: ${error}`;
-            warn.style.display = "block";
-            logs.textContent = "";
-        }
-    }
-
-    async function refreshDeviceNormalizerModal() {
-        if (!activeNormalizerDeviceId) return;
-        const warn = document.getElementById("device-normalizer-warning");
-        const status = document.getElementById("device-normalizer-status");
-        const logs = document.getElementById("device-normalizer-logs");
-
-        warn.style.display = "none";
-        warn.textContent = "";
-        status.textContent = "";
-        logs.textContent = "Cargando...";
-
-        try {
-            const res = await fetch(`/api/devices/${encodeURIComponent(activeNormalizerDeviceId)}/normalizer`);
-            const data = await res.json();
-            if (!res.ok || !data.ok) {
-                logs.textContent = data.error || "No se pudo consultar normalizador";
-                return;
-            }
-
-            if (data.installed === false) {
-                warn.textContent = "Normalizador no detectado en este dispositivo (puede faltar instalación o permisos sudo).";
-                warn.style.display = "block";
-            }
-
-            const svc = data.service || {};
-            const tmr = data.timer || {};
-            status.innerHTML = `Service: ${escapeHtml(svc.name || 'vidloop-media-normalizer.service')} | Estado: ${renderServiceBadge(svc.active)} | Enabled: ${escapeHtml(svc.enabled || 'unknown')}<br>`
-                + `Timer: ${escapeHtml(tmr.name || 'vidloop-media-normalizer.timer')} | Estado: ${renderServiceBadge(tmr.active)} | Enabled: ${escapeHtml(tmr.enabled || 'unknown')}`;
-            logs.textContent = data.logs || "(sin logs)";
-        } catch (error) {
-            logs.textContent = `Error de red: ${error}`;
-        }
-    }
-
-    async function runDeviceNormalizerNow() {
-        if (!activeNormalizerDeviceId) return;
-        const warn = document.getElementById("device-normalizer-warning");
-        const logs = document.getElementById("device-normalizer-logs");
-
-        warn.style.display = "none";
-        warn.textContent = "";
-        logs.textContent = "Ejecutando...";
-
-        try {
-            const res = await fetch(`/api/devices/${encodeURIComponent(activeNormalizerDeviceId)}/normalizer/run`, {
-                method: "POST",
-            });
-            const data = await res.json();
-            if (!res.ok || !data.ok) {
-                warn.textContent = data.error || "No se pudo ejecutar";
-                warn.style.display = "block";
-                logs.textContent = "";
-                return;
-            }
-            await refreshDeviceNormalizerModal();
-        } catch (error) {
-            warn.textContent = `Error de red: ${error}`;
-            warn.style.display = "block";
-            logs.textContent = "";
-        }
     }
 
     document.querySelectorAll(".btn-edit-user").forEach(btn => {
@@ -1337,46 +1079,6 @@
             await refreshDeviceLogModal();
         });
     });
-
-    document.querySelectorAll(".btn-device-radio").forEach(btn => {
-        btn.addEventListener("click", async () => {
-            const deviceId = btn.dataset.deviceId;
-            const deviceName = btn.dataset.deviceName;
-            activeRadioDeviceId = deviceId;
-
-            const modal = document.getElementById("device-radio-modal");
-            const title = document.getElementById("device-radio-title");
-            title.textContent = `Radio de ${deviceName}`;
-            modal.style.display = "block";
-            await refreshDeviceRadioModal();
-        });
-    });
-
-    document.querySelectorAll(".btn-device-normalizer").forEach(btn => {
-        btn.addEventListener("click", async () => {
-            const deviceId = btn.dataset.deviceId;
-            const deviceName = btn.dataset.deviceName;
-            activeNormalizerDeviceId = deviceId;
-
-            const modal = document.getElementById("device-normalizer-modal");
-            const title = document.getElementById("device-normalizer-title");
-            title.textContent = `Normalizador de ${deviceName}`;
-            modal.style.display = "block";
-            await refreshDeviceNormalizerModal();
-        });
-    });
-
-    const radioApplyBtn = document.getElementById("radio-apply-btn");
-    if (radioApplyBtn) radioApplyBtn.addEventListener("click", applyDeviceRadioConfig);
-    const radioRestartBtn = document.getElementById("radio-restart-btn");
-    if (radioRestartBtn) radioRestartBtn.addEventListener("click", restartDeviceRadio);
-    const radioRefreshBtn = document.getElementById("radio-refresh-btn");
-    if (radioRefreshBtn) radioRefreshBtn.addEventListener("click", refreshDeviceRadioModal);
-
-    const normalizerRunBtn = document.getElementById("normalizer-run-btn");
-    if (normalizerRunBtn) normalizerRunBtn.addEventListener("click", runDeviceNormalizerNow);
-    const normalizerRefreshBtn = document.getElementById("normalizer-refresh-btn");
-    if (normalizerRefreshBtn) normalizerRefreshBtn.addEventListener("click", refreshDeviceNormalizerModal);
 
     const logRefreshBtn = document.getElementById("device-log-refresh-btn");
     if (logRefreshBtn) {

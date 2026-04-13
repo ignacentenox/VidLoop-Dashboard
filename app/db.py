@@ -142,6 +142,14 @@ def get_user_by_username(username: str, db_path: Path = DB_DEFAULT) -> Optional[
     return dict(row)
 
 
+def get_user_by_id(user_id: int, db_path: Path = DB_DEFAULT) -> Optional[Dict[str, Any]]:
+    with _connect(db_path) as conn:
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if row is None:
+        return None
+    return dict(row)
+
+
 def add_user(username: str, password_hash: str, role: str, db_path: Path = DB_DEFAULT) -> None:
     with _connect(db_path) as conn:
         conn.execute(

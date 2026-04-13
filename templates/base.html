@@ -17,24 +17,36 @@
                     <h1>VIDLOOP DASHBOARD</h1>
                     <p class="lead">Central para gestionar contenido audiovisual</p>
                 </div>
-                <div id="header-status-card"
-                    class="header-card {% if maintenance_enabled|default(false) %}status-maintenance{% else %}status-online{% endif %}">
-                    <p class="header-label">Estado</p>
-                    <p class="header-value" id="header-status-value">
-                        <span class="status-dot" aria-hidden="true"></span>
-                        {% if maintenance_enabled|default(false) %}
-                        Mantenimiento
-                        {% else %}
-                        Online
-                        {% endif %}
-                    </p>
-                    <p class="header-note" id="header-status-note">
-                        {% if maintenance_enabled|default(false) %}
-                        {{ maintenance_message|default('Sistema en mantenimiento temporal') }}
-                        {% else %}
-                        Servidor listo para distribuir contenido
-                        {% endif %}
-                    </p>
+                <div class="header-side">
+                    {% if current_user %}
+                    <div class="session-card">
+                        <p class="header-label">Sesión activa</p>
+                        <p class="session-user">{{ current_user.username }}</p>
+                        <p class="session-role">Rol: {{ current_user.role|capitalize }}</p>
+                        <form action="/logout" method="post" class="session-logout-form">
+                            <button type="submit" class="session-logout-btn">Cerrar sesión</button>
+                        </form>
+                    </div>
+                    {% endif %}
+                    <div id="header-status-card"
+                        class="header-card {% if maintenance_enabled|default(false) %}status-maintenance{% else %}status-online{% endif %}">
+                        <p class="header-label">Estado</p>
+                        <p class="header-value" id="header-status-value">
+                            <span class="status-dot" aria-hidden="true"></span>
+                            {% if maintenance_enabled|default(false) %}
+                            Mantenimiento
+                            {% else %}
+                            Online
+                            {% endif %}
+                        </p>
+                        <p class="header-note" id="header-status-note">
+                            {% if maintenance_enabled|default(false) %}
+                            {{ maintenance_message|default('Sistema en mantenimiento temporal') }}
+                            {% else %}
+                            Servidor listo para distribuir contenido
+                            {% endif %}
+                        </p>
+                    </div>
                 </div>
             </div>
         </div>

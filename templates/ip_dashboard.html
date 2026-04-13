@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel hero hero-compact">
+	<div>
+		<p class="eyebrow">Inventario de red</p>
+		<h2>Mapa operativo de IPs de todas las Raspberry Pi</h2>
+		<p class="lead">Buscá rápido por nombre, IP WireGuard o IP local y exportá el inventario para operación
+			distribuida.</p>
+	</div>
+	<div class="hero-actions">
+		<a href="/" class="ghost-link-btn">Volver al dashboard</a>
+	</div>
+</section>
+
+<section class="panel">
+	<div class="inventory-summary-grid">
+		<article class="inventory-stat-card">
+			<span class="inventory-stat-label">RPIs totales</span>
+			<strong class="inventory-stat-value">{{ inventory_summary.total }}</strong>
+		</article>
+		<article class="inventory-stat-card">
+			<span class="inventory-stat-label">Con WireGuard</span>
+			<strong class="inventory-stat-value">{{ inventory_summary.with_wireguard }}</strong>
+		</article>
+		<article class="inventory-stat-card">
+			<span class="inventory-stat-label">Con IP local</span>
+			<strong class="inventory-stat-value">{{ inventory_summary.with_local }}</strong>
+		</article>
+		<article class="inventory-stat-card inventory-stat-warn">
+			<span class="inventory-stat-label">Sin fallback LAN</span>
+			<strong class="inventory-stat-value">{{ inventory_summary.without_local }}</strong>
+		</article>
+	</div>
+
+	<div class="inventory-toolbar">
+		<label class="inventory-search-wrap">
+			<span>Buscar</span>
+			<input type="text" id="inventory-search" placeholder="Nombre, WireGuard, IP local o dueño" />
+		</label>
+		<div class="inventory-toolbar-actions">
+			<button type="button" id="inventory-clear-btn">Limpiar</button>
+			<button type="button" id="inventory-export-btn">Exportar CSV</button>
+		</div>
+	</div>
+
+	<p class="mini-label">Mostrando <span id="inventory-visible-count">{{ inventory_rows|length }}</span> de {{
+		inventory_rows|length }} RPIs.</p>
+
+	<div class="inventory-table-wrap">
+		<table class="devices-table inventory-table">
+			<thead>
+				<tr>
+					<th>Raspberry</th>
+					<th>IP WireGuard</th>
+					<th>IP local</th>
+					<th>Puerto</th>
+					<th>Dueño</th>
+					<th>Ruta operativa</th>
+				</tr>
+			</thead>
+			<tbody id="inventory-table-body">
+				{% for row in inventory_rows %}
+				<tr class="inventory-row"
+					data-search="{{ (row.name ~ ' ' ~ row.wireguard_ip ~ ' ' ~ row.local_ip ~ ' ' ~ row.owner_username ~ ' ' ~ row.routing_mode)|lower }}">
+					<td data-label="Raspberry">
+						<strong>{{ row.name }}</strong>
+					</td>
+					<td data-label="IP WireGuard">
+						<span class="inventory-ip-chip">{{ row.wireguard_ip or "Sin IP" }}</span>
+					</td>
+					<td data-label="IP local">
+						{% if row.local_ip %}
+						<span class="inventory-ip-chip inventory-ip-chip-local">{{ row.local_ip }}</span>
+						{% else %}
+						<span class="inventory-ip-muted">Sin fallback LAN</span>
+						{% endif %}
+					</td>
+					<td data-label="Puerto">{{ row.port }}</td>
+					<td data-label="Dueño">{{ row.owner_username or "Sin asignar" }}</td>
+					<td data-label="Ruta operativa">{{ row.routing_mode }}</td>
+				</tr>
+				{% endfor %}
+			</tbody>
+		</table>
+	</div>
+</section>
+
+<script>
+	const inventorySearch = document.getElementById('inventory-search');
+	const inventoryRows = Array.from(document.querySelectorAll('.inventory-row'));
+	const inventoryVisibleCount = document.getElementById('inventory-visible-count');
+	const inventoryClearBtn = document.getElementById('inventory-clear-btn');
+	const inventoryExportBtn = document.getElementById('inventory-export-btn');
+
+	function refreshInventoryFilter() {
+		const query = (inventorySearch?.value || '').trim().toLowerCase();
+		let visible = 0;
+
+		inventoryRows.forEach((row) => {
+			const haystack = row.dataset.search || '';
+			const match = !query || haystack.includes(query);
+			row.style.display = match ? '' : 'none';
+			if (match) visible += 1;
+		});
+
+		if (inventoryVisibleCount) inventoryVisibleCount.textContent = String(visible);
+	}
+
+	function exportInventoryCsv() {
+		const header = ['Raspberry', 'IP WireGuard', 'IP local', 'Puerto', 'Dueño', 'Ruta operativa'];
+		const lines = [header];
+
+		inventoryRows.forEach((row) => {
+			if (row.style.display === 'none') return;
+			const cols = Array.from(row.children).map((cell) => cell.innerText.replace(/\s+/g, ' ').trim());
+			lines.push(cols);
+		});
+
+		const csv = lines
+			.map((cols) => cols.map((value) => '"' + String(value).replaceAll('"', '""') + '"').join(','))
+			.join('\n');
+
+		const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = 'vidloop-rpis-inventario.csv';
+		document.body.appendChild(link);
+		link.click();
+		link.remove();
+		URL.revokeObjectURL(url);
+	}
+
+	if (inventorySearch) inventorySearch.addEventListener('input', refreshInventoryFilter);
+	if (inventoryClearBtn) inventoryClearBtn.addEventListener('click', () => {
+		if (!inventorySearch) return;
+		inventorySearch.value = '';
+		refreshInventoryFilter();
+		inventorySearch.focus();
+	});
+	if (inventoryExportBtn) inventoryExportBtn.addEventListener('click', exportInventoryCsv);
+</script>
+{% endblock %}

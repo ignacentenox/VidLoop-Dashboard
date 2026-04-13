@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="es">
+
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>Acceso | VidLoop Dashboard</title>
+	<link rel="icon" type="image/png" href="/static/LOGO%20VIDLOOP.png?v=1" />
+	<link rel="stylesheet" href="/static/styles.css" />
+</head>
+
+<body class="login-screen">
+	<main class="login-shell">
+		<section class="login-brand-panel">
+			<div class="login-brand-top">
+				<img src="/static/LOGO%20VIDLOOP.png?v=1" alt="VidLoop" class="login-logo" />
+				<span class="login-badge">Acceso privado</span>
+			</div>
+			<p class="eyebrow">VidLoop Dashboard</p>
+			<h1>Un acceso más claro, más seguro y sin el prompt del navegador.</h1>
+			<p class="login-intro">
+				Ingresá al panel central para administrar dispositivos, generar contenido y operar despliegues remotos
+				desde una sesión persistente.
+			</p>
+
+			<div class="login-feature-list">
+				<article class="login-feature-card">
+					<strong>Operación centralizada</strong>
+					<span>Dispositivos, videos, programación y mantenimiento desde un solo lugar.</span>
+				</article>
+				<article class="login-feature-card">
+					<strong>Sesión profesional</strong>
+					<span>Ingreso por formulario, logout visible y navegación más consistente.</span>
+				</article>
+				<article class="login-feature-card">
+					<strong>Listo para producción</strong>
+					<span>Compatible con tu despliegue activo en vidloop.dev.ar y también con uso local.</span>
+				</article>
+			</div>
+
+			<div class="login-footer-line">
+				<span>Panel operativo</span>
+				<span>vidloop.dev.ar</span>
+			</div>
+		</section>
+
+		<section class="login-form-panel">
+			<p class="login-form-label">Iniciar sesión</p>
+			<h2>Entrá al dashboard</h2>
+			<p class="login-form-copy">Usá tu usuario habilitado para continuar con la gestión del sistema.</p>
+
+			{% if msg %}
+			<div class="notice success">{{ msg }}</div>
+			{% endif %}
+			{% if err %}
+			<div class="notice error">{{ err }}</div>
+			{% endif %}
+
+			<form action="/login" method="post" class="login-form">
+				<input type="hidden" name="next" value="{{ next }}" />
+
+				<label>
+					Usuario
+					<input type="text" name="username" value="{{ prefilled_username }}" autocomplete="username"
+						placeholder="Tu usuario" required />
+				</label>
+
+				<label>
+					Contraseña
+					<div class="login-password-row">
+						<input id="login-password" type="password" name="password" autocomplete="current-password"
+							placeholder="Tu contraseña" required />
+						<button type="button" class="login-password-toggle" id="login-password-toggle">
+							Mostrar
+						</button>
+					</div>
+				</label>
+
+				<button type="submit" class="login-submit-btn">Ingresar</button>
+			</form>
+
+			<div class="login-meta">
+				<span>Sesión con persistencia por cookie firmada</span>
+				<span>Salida manual disponible desde el panel</span>
+			</div>
+		</section>
+	</main>
+
+	<script>
+		const toggleBtn = document.getElementById('login-password-toggle');
+		const passwordInput = document.getElementById('login-password');
+
+		if (toggleBtn && passwordInput) {
+			toggleBtn.addEventListener('click', () => {
+				const visible = passwordInput.type === 'text';
+				passwordInput.type = visible ? 'password' : 'text';
+				toggleBtn.textContent = visible ? 'Mostrar' : 'Ocultar';
+			});
+		}
+
+		const savedDarkmode = localStorage.getItem('darkmode');
+		const useDarkMode = savedDarkmode === null ? true : savedDarkmode === '1';
+		document.body.classList.toggle('darkmode', useDarkMode);
+	</script>
+</body>
+
+</html>

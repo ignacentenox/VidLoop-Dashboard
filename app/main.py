@@ -1,9 +1,7 @@
 from __future__ import annotations
-import base64
 import json
 import os
 import re
-from dotenv import load_dotenv
 import secrets
 import shlex
 import shutil
@@ -12,13 +10,16 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlencode
 
+from dotenv import load_dotenv
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from passlib.context import CryptContext
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from passlib.context import CryptContext
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 
 from app import db
 from app.ssh_utils import run_scp, run_scp_download, run_ssh_command
@@ -170,11 +171,45 @@ def _load_default_devices_from_env() -> List[Dict[str, Any]]:
 
 
 DEFAULT_DEVICES = _load_default_devices_from_env()
+SESSION_SECRET = os.environ.get("SESSION_SECRET") or secrets.token_urlsafe(32)
+SESSION_MAX_AGE = max(1800, int(os.environ.get("SESSION_MAX_AGE", "43200")))
+SESSION_COOKIE_NAME = (os.environ.get("SESSION_COOKIE_NAME") or "vidloop_session").strip() or "vidloop_session"
+SESSION_COOKIE_SECURE = (os.environ.get("SESSION_COOKIE_SECURE") or "").strip().lower() in {"1", "true", "yes", "on"}
+PUBLIC_PATHS = {"/login", "/logout"}
+PUBLIC_PREFIXES = ("/static",)
+
+
+class AuthRequiredMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES):
+            return await call_next(request)
+
+        user = _get_session_user(request)
+        if not user:
+            if path.startswith("/api/"):
+                return JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED, content={"ok": False, "error": "Sesion expirada"})
+            return RedirectResponse(
+                url=_build_login_url(next_target=_requested_path(request), err="Iniciá sesión para continuar"),
+                status_code=303,
+            )
+
+        request.state.current_user = user
+        return await call_next(request)
+
 
 app = FastAPI(title="VIDLOOP-DASHBOARD", version="1.0.0")
+app.add_middleware(AuthRequiredMiddleware)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET,
+    session_cookie=SESSION_COOKIE_NAME,
+    max_age=SESSION_MAX_AGE,
+    same_site="lax",
+    https_only=SESSION_COOKIE_SECURE,
+)
 app.mount("/static", StaticFiles(directory=str(ROOT_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(ROOT_DIR / "templates"))
-security = HTTPBasic()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
@@ -216,8 +251,8 @@ def _ensure_admin_user() -> None:
     if db.count_users() > 0:
         return
 
-    admin_user = os.environ.get("ADMIN_USER", "igna")
-    admin_pass = os.environ.get("ADMIN_PASS", "4455")
+    admin_user = (os.environ.get("ADMIN_USER") or "adminvidloop").strip().lower() or "adminvidloop"
+    admin_pass = (os.environ.get("ADMIN_PASS") or "vidloop4455").strip() or "vidloop4455"
     password_hash = pwd_context.hash(admin_pass)
     db.add_user(admin_user, password_hash, "admin")
 
@@ -230,22 +265,66 @@ def _ensure_default_devices() -> None:
         db.add_device(device)
 
 
-def _get_current_user(credentials: HTTPBasicCredentials = Depends(security)) -> dict:
-    user = db.get_user_by_username(credentials.username)
+def _requested_path(request: Request) -> str:
+    query = f"?{request.url.query}" if request.url.query else ""
+    return f"{request.url.path}{query}"
+
+
+def _is_safe_next_target(target: Optional[str]) -> bool:
+    if not target:
+        return False
+    return target.startswith("/") and not target.startswith("//")
+
+
+def _build_login_url(
+    next_target: Optional[str] = None,
+    err: Optional[str] = None,
+    msg: Optional[str] = None,
+) -> str:
+    params: Dict[str, str] = {}
+    if _is_safe_next_target(next_target):
+        params["next"] = str(next_target)
+    if err:
+        params["err"] = str(err)
+    if msg:
+        params["msg"] = str(msg)
+    if not params:
+        return "/login"
+    return f"/login?{urlencode(params)}"
+
+
+def _get_session_user(request: Request) -> Optional[dict]:
+    raw_user_id = request.session.get("user_id")
+    if raw_user_id is None:
+        return None
+
+    try:
+        user_id = int(raw_user_id)
+    except (TypeError, ValueError):
+        request.session.clear()
+        return None
+
+    user = db.get_user_by_id(user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Credenciales invalidas",
-            headers={"WWW-Authenticate": "Basic"},
-        )
+        request.session.clear()
+        return None
+    return user
 
-    if not pwd_context.verify(credentials.password, user["password_hash"]):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Credenciales invalidas",
-            headers={"WWW-Authenticate": "Basic"},
-        )
 
+def _store_session_user(request: Request, user: dict) -> None:
+    request.session.clear()
+    request.session["user_id"] = int(user["id"])
+
+
+def _get_current_user(request: Request) -> dict:
+    user = getattr(request.state, "current_user", None)
+    if user is not None:
+        return user
+
+    user = _get_session_user(request)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sesion no iniciada")
+    request.state.current_user = user
     return user
 
 
@@ -318,6 +397,78 @@ def _visible_devices_for_user(user: dict) -> List[dict]:
     return db.get_devices(owner_user_id=int(user["id"]))
 
 
+def _inventory_rows(devices: List[dict]) -> List[dict]:
+    rows: List[dict] = []
+    for device in sorted(devices, key=lambda item: ((item.get("name") or "").lower(), int(item.get("id") or 0))):
+        wireguard_ip = str(device.get("host") or "").strip()
+        local_ip = str(device.get("host_lan") or "").strip()
+        rows.append(
+            {
+                "id": int(device.get("id") or 0),
+                "name": str(device.get("name") or "Sin nombre").strip() or "Sin nombre",
+                "wireguard_ip": wireguard_ip,
+                "local_ip": local_ip,
+                "port": int(device.get("port") or 22),
+                "owner_username": str(device.get("owner_username") or "").strip(),
+                "routing_mode": "WireGuard + LAN fallback" if local_ip else "Solo WireGuard",
+            }
+        )
+    return rows
+
+
+@app.get("/login")
+def login_page(request: Request):
+    if _get_session_user(request):
+        return RedirectResponse(url="/", status_code=303)
+
+    next_target = request.query_params.get("next") or "/"
+    return templates.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "err": request.query_params.get("err"),
+            "msg": request.query_params.get("msg"),
+            "next": next_target if _is_safe_next_target(next_target) else "/",
+            "prefilled_username": request.query_params.get("username", ""),
+        },
+    )
+
+
+@app.post("/login")
+def login_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    next: str = Form("/"),
+):
+    clean_username = username.strip()
+    user = db.get_user_by_username(clean_username)
+    if user is None and clean_username.lower() != clean_username:
+        user = db.get_user_by_username(clean_username.lower())
+
+    if not user or not pwd_context.verify(password, user["password_hash"]):
+        return templates.TemplateResponse(
+            "login.html",
+            {
+                "request": request,
+                "err": "Usuario o contraseña inválidos",
+                "msg": None,
+                "next": next if _is_safe_next_target(next) else "/",
+                "prefilled_username": clean_username,
+            },
+            status_code=400,
+        )
+
+    _store_session_user(request, user)
+    return RedirectResponse(url=next if _is_safe_next_target(next) else "/", status_code=303)
+
+
+@app.post("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url=_build_login_url(msg="Sesión cerrada"), status_code=303)
+
+
 @app.get("/")
 def index(request: Request, user: dict = Depends(_get_current_user)):
     devices = _visible_devices_for_user(user)
@@ -345,6 +496,34 @@ def index(request: Request, user: dict = Depends(_get_current_user)):
             "err": err,
             "maintenance_message": maintenance_message,
             "maintenance_enabled": maintenance_enabled,
+        },
+    )
+
+
+@app.get("/admin/ip-dashboard")
+def ip_dashboard(request: Request, user: dict = Depends(_get_current_user)):
+    if user["role"] != "admin":
+        return RedirectResponse(url="/?err=Acceso denegado", status_code=303)
+
+    devices = db.get_devices()
+    rows = _inventory_rows(devices)
+    maintenance_config = _load_maintenance_config()
+
+    return templates.TemplateResponse(
+        "ip_dashboard.html",
+        {
+            "request": request,
+            "current_user": user,
+            "is_admin": True,
+            "maintenance_message": maintenance_config["message"],
+            "maintenance_enabled": maintenance_config["enabled"],
+            "inventory_rows": rows,
+            "inventory_summary": {
+                "total": len(rows),
+                "with_wireguard": sum(1 for row in rows if row["wireguard_ip"]),
+                "with_local": sum(1 for row in rows if row["local_ip"]),
+                "without_local": sum(1 for row in rows if not row["local_ip"]),
+            },
         },
     )
 

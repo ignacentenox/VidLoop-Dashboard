@@ -63,12 +63,15 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ## Acceso
-- Se usa autenticacion basica HTTP (el navegador pedira usuario y clave).
+- El acceso ahora se realiza desde una pantalla web de login con sesion persistente.
 - Si no hay usuarios creados, se genera un admin por defecto:
-	- Usuario: admin
-	- Password: admin123
+	- Usuario: adminvidloop
+	- Password: vidloop4455
 - Podes definirlos antes de iniciar:
 	- `ADMIN_USER` y `ADMIN_PASS`
+- Variables recomendadas para produccion:
+	- `SESSION_SECRET` con una cadena larga y aleatoria
+	- `SESSION_COOKIE_SECURE=1` si servis la app por HTTPS
 
 ## Uso con IPs VPN (WireGuard)
 
