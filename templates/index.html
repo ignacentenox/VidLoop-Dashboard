@@ -3,6 +3,87 @@
 {% set last_upload = uploads[0] if uploads else None %}
 {% set last_event = video_history[0] if video_history else None %}
 
+{# Banner de procesamiento de video en segundo plano #}
+<div id="processing-banner" style="display:none" class="panel"
+    style="background:#1a1a2e;border-left:4px solid #4f8ef7;padding:1rem 1.5rem;">
+    <div style="display:flex;align-items:center;gap:1rem;">
+        <svg id="processing-spinner" style="animation:spin 1s linear infinite;width:24px;height:24px;flex-shrink:0"
+            viewBox="0 0 24 24" fill="none" stroke="#4f8ef7" stroke-width="2">
+            <circle cx="12" cy="12" r="10" stroke-opacity=".25" />
+            <path d="M12 2a10 10 0 0 1 10 10" stroke="#4f8ef7" />
+        </svg>
+        <div>
+            <p style="margin:0;font-weight:600;color:#e2e8f0" id="processing-title">Generando video…</p>
+            <p style="margin:0;font-size:.85rem;color:#94a3b8" id="processing-detail">FFmpeg está procesando las
+                imágenes en segundo plano.</p>
+        </div>
+    </div>
+</div>
+<style>
+    @keyframes spin {
+        to {
+            transform: rotate(360deg)
+        }
+    }
+</style>
+<script>
+    (function () {
+        const params = new URLSearchParams(window.location.search);
+        const uploadId = params.get('processing');
+        if (!uploadId) return;
+
+        const banner = document.getElementById('processing-banner');
+        const title = document.getElementById('processing-title');
+        const detail = document.getElementById('processing-detail');
+        const spinner = document.getElementById('processing-spinner');
+        banner.style.display = 'block';
+
+        let attempts = 0;
+        const MAX = 450; // 15 minutos a 2s por poll
+
+        function poll() {
+            if (attempts++ > MAX) {
+                title.textContent = 'El proceso tardó demasiado. Revisá el historial.';
+                spinner.style.display = 'none';
+                return;
+            }
+            fetch('/api/uploads/' + uploadId + '/status', { credentials: 'same-origin' })
+                .then(r => r.ok ? r.json() : Promise.reject(r.status))
+                .then(data => {
+                    if (data.status === 'ready') {
+                        title.textContent = '¡Video generado! Descargando…';
+                        detail.textContent = 'El archivo se está descargando automáticamente.';
+                        spinner.style.animation = 'none';
+                        spinner.style.stroke = '#22c55e';
+                        // Disparar descarga sin abandonar la página
+                        const a = document.createElement('a');
+                        a.href = '/uploads/' + uploadId;
+                        a.download = 'VidLoop.mp4';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        // Redirigir después de un momento para que la descarga arranque
+                        setTimeout(function () {
+                            const url = new URL(window.location);
+                            url.searchParams.delete('processing');
+                            url.searchParams.set('msg', 'Video generado correctamente');
+                            window.location.href = url.toString();
+                        }, 1500);
+                    } else if (data.status === 'error') {
+                        title.textContent = 'Error al generar el video';
+                        detail.textContent = data.detail || 'Revisá los logs del servidor.';
+                        spinner.style.animation = 'none';
+                        spinner.style.stroke = '#ef4444';
+                    } else {
+                        setTimeout(poll, 2000);
+                    }
+                })
+                .catch(() => setTimeout(poll, 3000));
+        }
+        setTimeout(poll, 2000);
+    })();
+</script>
+
 <section class="panel hero">
     <div>
         <p class="eyebrow">Control centralizado</p>
@@ -127,7 +208,13 @@
         </div>
 
         <p class="mini-label">Seleccioná destino</p>
-        <button type="button" class="select-all-btn" id="bulk-select-all-btn">Seleccionar todas</button>
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 0.5rem; margin-bottom: 1.2rem;">
+            <button type="button" class="select-all-btn" id="bulk-select-all-btn">Seleccionar todas</button>
+            <div class="owner-filter-wrapper">
+                <span class="mini-label" style="margin: 0 0 0.3rem 0; font-size: 0.72rem;">Seleccionar por dueño:</span>
+                <div id="bulk-owner-chips" class="owner-chips-flex"></div>
+            </div>
+        </div>
 
         <table class="devices-table bulk-devices-table">
             <thead>
@@ -140,7 +227,7 @@
                 {% for device in devices %}
                 <tr>
                     <td data-label="Selección masiva">
-                        <input type="checkbox" class="bulk-device" name="device_ids" value="{{ device.id }}" checked />
+                        <input type="checkbox" class="bulk-device" name="device_ids" value="{{ device.id }}" data-owner="{{ device.owner_username or 'Sin asignar' }}" checked />
                     </td>
                     <td data-label="Destino">{{ device.name }} ({{ device.host }})</td>
                 </tr>
@@ -203,10 +290,12 @@
                 </td>
                 {% endif %}
                 <td data-label="Info">
-                    <button type="button" class="btn-device-info action-btn" data-device-id="{{ device.id }}"
-                        data-device-name="{{ device.name }}">+ Info</button>
-                    <button type="button" class="btn-device-log action-btn" data-device-id="{{ device.id }}"
-                        data-device-name="{{ device.name }}">Ver log</button>
+                    <div class="device-row-controls">
+                        <button type="button" class="btn-device-info action-btn" data-device-id="{{ device.id }}"
+                            data-device-name="{{ device.name }}">+ Info</button>
+                        <button type="button" class="btn-device-log action-btn" data-device-id="{{ device.id }}"
+                            data-device-name="{{ device.name }}">Ver log</button>
+                    </div>
                 </td>
                 <td data-label="Contenido">
                     <button type="button" class="btn-view-files action-btn" data-device-id="{{ device.id }}"
@@ -219,6 +308,13 @@
                         </form>
                         <form action="/devices/{{ device.id }}/reboot" method="post">
                             <button type="submit" class="danger action-btn">Reiniciar</button>
+                        </form>
+                        <form action="/devices/{{ device.id }}/rotate" method="post">
+                            <select name="rotation" class="action-select" onchange="if(confirm('¿Confirmas aplicar la rotación? El dispositivo se reiniciará inmediatamente para aplicar el cambio.')) this.form.submit(); else { this.value = '{{ device.display_rotate }}'; }">
+                                <option value="0" {% if device.display_rotate == 0 or device.display_rotate is none %}selected{% endif %}>Horizontal (0°)</option>
+                                <option value="1" {% if device.display_rotate == 1 %}selected{% endif %}>Vertical (90°)</option>
+                                <option value="3" {% if device.display_rotate == 3 %}selected{% endif %}>Vertical Inv. (-90°)</option>
+                            </select>
                         </form>
                     </div>
                 </td>
@@ -925,15 +1021,6 @@
                 ${hasMany ? '<button type="button" onclick="saveFilesOrder()">Guardar orden</button>' : ''}
             </div>
             <video id="device-video-preview" class="preview" controls preload="metadata" style="display:none;margin-bottom:0.7rem;"></video>
-            <div class="dup-wrap">
-                <label>Duplicar archivo
-                    <select id="dup-source-file">
-                        ${activeFilesList.map(file => `<option value="${escapeHtml(file.name)}">${escapeHtml(file.name)}</option>`).join("")}
-                    </select>
-                </label>
-                <div class="dup-targets">${targetDevicesHtml()}</div>
-                <button type="button" onclick="duplicateSelectedVideo()">Duplicar a estas RPIs</button>
-            </div>
             ${activeFilesList.length === 0
                 ? '<p>Sin archivos en la carpeta remota.</p>'
                 : `<table class="files-table"><thead><tr><th>Archivo</th><th>Tamaño</th><th>Modificado</th><th>Acciones</th></tr></thead><tbody>${rows}</tbody></table>`}
@@ -984,6 +1071,7 @@
                 <div class="info-item"><span class="info-k">Estado</span><span class="${statusClass}">${escapeHtml(status)}</span></div>
                 <div class="info-item"><span class="info-k">Temperatura</span><span class="info-v">${escapeHtml(info?.temperature || "--")}</span></div>
                 <div class="info-item"><span class="info-k">Tiempo encendido</span><span class="info-v">${escapeHtml(formatUptimeEs(info?.uptime || "--"))}</span></div>
+                <div class="info-item"><span class="info-k">IP LAN</span><span class="info-v">${escapeHtml(info?.host_lan || "--")}</span></div>
                 <div class="info-item"><span class="info-k">Último check</span><span class="info-v">${escapeHtml(info?.last_check || "--")}</span></div>
                 <div class="info-item"><span class="info-k">Servicio</span><span class="info-v">${escapeHtml(info?.video_service || "video_looper")}</span></div>
                 <div class="info-item"><span class="info-k">Ruta video</span><span class="info-v">${escapeHtml(info?.video_path || "--")}</span></div>
@@ -1112,15 +1200,70 @@
     }
 
     const bulkSelectAllBtn = document.getElementById("bulk-select-all-btn");
+    const bulkOwnerChipsContainer = document.getElementById("bulk-owner-chips");
+
     if (bulkSelectAllBtn) {
+        const checkboxes = document.querySelectorAll(".bulk-device");
+
         function updateBulkSelectAllText() {
-            const checkboxes = document.querySelectorAll(".bulk-device");
             const allChecked = Array.from(checkboxes).length > 0 && Array.from(checkboxes).every(cb => cb.checked);
             bulkSelectAllBtn.textContent = allChecked ? "Deseleccionar todas" : "Seleccionar todas";
+            updateOwnerChipsState();
+        }
+
+        function updateOwnerChipsState() {
+            if (!bulkOwnerChipsContainer) return;
+            const chips = bulkOwnerChipsContainer.querySelectorAll(".owner-chip");
+            chips.forEach(chip => {
+                const owner = chip.dataset.owner;
+                const ownerCheckboxes = Array.from(checkboxes).filter(cb => cb.dataset.owner === owner);
+                const allOwnerChecked = ownerCheckboxes.length > 0 && ownerCheckboxes.every(cb => cb.checked);
+                
+                if (allOwnerChecked) {
+                    chip.classList.add("active");
+                    chip.classList.remove("inactive");
+                } else {
+                    chip.classList.add("inactive");
+                    chip.classList.remove("active");
+                }
+            });
+        }
+
+        function setupOwnerChips() {
+            if (!bulkOwnerChipsContainer) return;
+            bulkOwnerChipsContainer.innerHTML = "";
+            
+            const ownerCounts = {};
+            checkboxes.forEach(cb => {
+                const owner = cb.dataset.owner || "Sin asignar";
+                ownerCounts[owner] = (ownerCounts[owner] || 0) + 1;
+            });
+            
+            const uniqueOwners = Object.keys(ownerCounts).sort();
+            
+            uniqueOwners.forEach(owner => {
+                const chip = document.createElement("button");
+                chip.type = "button";
+                chip.className = "owner-chip inactive";
+                chip.dataset.owner = owner;
+                chip.innerHTML = `${escapeHtml(owner)} <span class="owner-chip-count">${ownerCounts[owner]}</span>`;
+                
+                chip.addEventListener("click", () => {
+                    const ownerCheckboxes = Array.from(checkboxes).filter(cb => cb.dataset.owner === owner);
+                    const allOwnerChecked = ownerCheckboxes.length > 0 && ownerCheckboxes.every(cb => cb.checked);
+                    
+                    ownerCheckboxes.forEach(cb => {
+                        cb.checked = !allOwnerChecked;
+                    });
+                    
+                    updateBulkSelectAllText();
+                });
+                
+                bulkOwnerChipsContainer.appendChild(chip);
+            });
         }
 
         bulkSelectAllBtn.addEventListener("click", () => {
-            const checkboxes = document.querySelectorAll(".bulk-device");
             const allChecked = Array.from(checkboxes).length > 0 && Array.from(checkboxes).every(cb => cb.checked);
             checkboxes.forEach(cb => {
                 cb.checked = !allChecked;
@@ -1128,10 +1271,11 @@
             updateBulkSelectAllText();
         });
 
-        document.querySelectorAll(".bulk-device").forEach(cb => {
+        checkboxes.forEach(cb => {
             cb.addEventListener("change", updateBulkSelectAllText);
         });
 
+        setupOwnerChips();
         updateBulkSelectAllText();
     }
 

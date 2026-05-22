@@ -4,7 +4,7 @@
 	<div>
 		<p class="eyebrow">Inventario de red</p>
 		<h2>Mapa operativo de IPs de todas las Raspberry Pi</h2>
-		<p class="lead">Buscá rápido por nombre, IP WireGuard o IP local y exportá el inventario para operación
+		<p class="lead">Buscá rápido por nombre, IP ZeroTier o IP local y exportá el inventario para operación
 			distribuida.</p>
 	</div>
 	<div class="hero-actions">
@@ -19,8 +19,8 @@
 			<strong class="inventory-stat-value">{{ inventory_summary.total }}</strong>
 		</article>
 		<article class="inventory-stat-card">
-			<span class="inventory-stat-label">Con WireGuard</span>
-			<strong class="inventory-stat-value">{{ inventory_summary.with_wireguard }}</strong>
+			<span class="inventory-stat-label">Con ZeroTier</span>
+			<strong class="inventory-stat-value">{{ inventory_summary.with_zerotier }}</strong>
 		</article>
 		<article class="inventory-stat-card">
 			<span class="inventory-stat-label">Con IP local</span>
@@ -35,10 +35,11 @@
 	<div class="inventory-toolbar">
 		<label class="inventory-search-wrap">
 			<span>Buscar</span>
-			<input type="text" id="inventory-search" placeholder="Nombre, WireGuard, IP local o dueño" />
+			<input type="text" id="inventory-search" placeholder="Nombre, ZeroTier, IP local o dueño" />
 		</label>
 		<div class="inventory-toolbar-actions">
 			<button type="button" id="inventory-clear-btn">Limpiar</button>
+			<button type="button" id="inventory-scan-btn" style="background-color: var(--accent); color: white;">Escanear IPs locales</button>
 			<button type="button" id="inventory-export-btn">Exportar CSV</button>
 		</div>
 	</div>
@@ -51,7 +52,7 @@
 			<thead>
 				<tr>
 					<th>Raspberry</th>
-					<th>IP WireGuard</th>
+					<th>IP ZeroTier</th>
 					<th>IP local</th>
 					<th>Puerto</th>
 					<th>Dueño</th>
@@ -61,12 +62,12 @@
 			<tbody id="inventory-table-body">
 				{% for row in inventory_rows %}
 				<tr class="inventory-row"
-					data-search="{{ (row.name ~ ' ' ~ row.wireguard_ip ~ ' ' ~ row.local_ip ~ ' ' ~ row.owner_username ~ ' ' ~ row.routing_mode)|lower }}">
+					data-search="{{ (row.name ~ ' ' ~ row.zerotier_ip ~ ' ' ~ row.local_ip ~ ' ' ~ row.owner_username ~ ' ' ~ row.routing_mode)|lower }}">
 					<td data-label="Raspberry">
 						<strong>{{ row.name }}</strong>
 					</td>
-					<td data-label="IP WireGuard">
-						<span class="inventory-ip-chip">{{ row.wireguard_ip or "Sin IP" }}</span>
+					<td data-label="IP ZeroTier">
+						<span class="inventory-ip-chip">{{ row.zerotier_ip or "Sin IP" }}</span>
 					</td>
 					<td data-label="IP local">
 						{% if row.local_ip %}
@@ -90,6 +91,7 @@
 	const inventoryRows = Array.from(document.querySelectorAll('.inventory-row'));
 	const inventoryVisibleCount = document.getElementById('inventory-visible-count');
 	const inventoryClearBtn = document.getElementById('inventory-clear-btn');
+	const inventoryScanBtn = document.getElementById('inventory-scan-btn');
 	const inventoryExportBtn = document.getElementById('inventory-export-btn');
 
 	function refreshInventoryFilter() {
@@ -107,7 +109,7 @@
 	}
 
 	function exportInventoryCsv() {
-		const header = ['Raspberry', 'IP WireGuard', 'IP local', 'Puerto', 'Dueño', 'Ruta operativa'];
+		const header = ['Raspberry', 'IP ZeroTier', 'IP local', 'Puerto', 'Dueño', 'Ruta operativa'];
 		const lines = [header];
 
 		inventoryRows.forEach((row) => {
@@ -132,12 +134,42 @@
 	}
 
 	if (inventorySearch) inventorySearch.addEventListener('input', refreshInventoryFilter);
-	if (inventoryClearBtn) inventoryClearBtn.addEventListener('click', () => {
-		if (!inventorySearch) return;
-		inventorySearch.value = '';
-		refreshInventoryFilter();
-		inventorySearch.focus();
-	});
+	
+	if (inventoryClearBtn) {
+		inventoryClearBtn.addEventListener('click', () => {
+			if (!inventorySearch) return;
+			inventorySearch.value = '';
+			refreshInventoryFilter();
+			inventorySearch.focus();
+		});
+	}
+
+	if (inventoryScanBtn) {
+		inventoryScanBtn.addEventListener('click', async () => {
+			const originalText = inventoryScanBtn.textContent;
+			inventoryScanBtn.disabled = true;
+			inventoryScanBtn.textContent = 'Escaneando IPs... ⏳';
+			
+			try {
+				const res = await fetch('/admin/ip-dashboard/scan', { method: 'POST' });
+				const data = await res.json();
+				if (res.ok && data.ok) {
+					const successes = data.results.filter(r => r.status === 'Success').length;
+					alert(`Escaneo completo. Se detectaron y guardaron ${successes} IPs locales.`);
+					window.location.reload();
+				} else {
+					alert('Error en el escaneo: ' + (data.error || 'Intente nuevamente.'));
+					inventoryScanBtn.disabled = false;
+					inventoryScanBtn.textContent = originalText;
+				}
+			} catch (error) {
+				alert('Error de red al escanear: ' + error);
+				inventoryScanBtn.disabled = false;
+				inventoryScanBtn.textContent = originalText;
+			}
+		});
+	}
+
 	if (inventoryExportBtn) inventoryExportBtn.addEventListener('click', exportInventoryCsv);
 </script>
 {% endblock %}

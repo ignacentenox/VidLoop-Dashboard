@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
 
 from dotenv import load_dotenv
-from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -43,6 +43,51 @@ def _ssh(dev: dict, command: str, timeout_sec: int = 12) -> str:
         timeout_sec=timeout_sec,
         host_fallback=dev.get("host_lan"),
     )
+
+
+def _parse_lan_ip(ips_str: str, host_ip: str) -> Optional[str]:
+    """
+    Analiza una lista de IPs (obtenidas de 'hostname -I') y retorna
+    el primer candidato viable para la IP física local (LAN).
+    """
+    ips = [ip.strip() for ip in ips_str.split() if ip.strip()]
+    valid_lan_ips = []
+    
+    for ip in ips:
+        # Excluir la IP de ZeroTier/VPN configurada actualmente
+        if ip == host_ip:
+            continue
+        # Excluir loopback
+        if ip.startswith("127."):
+            continue
+            
+        # Comprobar rangos privados IPv4 estándar
+        # 1. Class C: 192.168.0.0/16
+        if ip.startswith("192.168."):
+            valid_lan_ips.append(ip)
+        # 2. Class A: 10.0.0.0/8
+        elif ip.startswith("10."):
+            valid_lan_ips.append(ip)
+        # 3. Class B: 172.16.0.0/12
+        elif ip.startswith("172."):
+            parts = ip.split(".")
+            if len(parts) >= 2:
+                try:
+                    second_octet = int(parts[1])
+                    if 16 <= second_octet <= 31:
+                        valid_lan_ips.append(ip)
+                except ValueError:
+                    pass
+                    
+    if not valid_lan_ips:
+        return None
+        
+    # Priorizar subredes 192.168.* y 10.* sobre 172.* para evitar puentes virtuales (Docker/Docker Compose, etc.)
+    for ip in valid_lan_ips:
+        if ip.startswith("192.168.") or ip.startswith("10."):
+            return ip
+            
+    return valid_lan_ips[0]
 
 
 def _scp(local_path: str, dev: dict, remote_path: str, timeout_sec: int = 20) -> None:
@@ -357,7 +402,7 @@ def _build_video_from_images(image_paths: List[Path], duration_sec: int, output_
         "-c:v",
         "libx264",
         "-preset",
-        "medium",
+        "ultrafast",
         "-crf",
         "23",
         "-r",
@@ -400,17 +445,17 @@ def _visible_devices_for_user(user: dict) -> List[dict]:
 def _inventory_rows(devices: List[dict]) -> List[dict]:
     rows: List[dict] = []
     for device in sorted(devices, key=lambda item: ((item.get("name") or "").lower(), int(item.get("id") or 0))):
-        wireguard_ip = str(device.get("host") or "").strip()
+        zerotier_ip = str(device.get("host") or "").strip()
         local_ip = str(device.get("host_lan") or "").strip()
         rows.append(
             {
                 "id": int(device.get("id") or 0),
                 "name": str(device.get("name") or "Sin nombre").strip() or "Sin nombre",
-                "wireguard_ip": wireguard_ip,
+                "zerotier_ip": zerotier_ip,
                 "local_ip": local_ip,
                 "port": int(device.get("port") or 22),
                 "owner_username": str(device.get("owner_username") or "").strip(),
-                "routing_mode": "WireGuard + LAN fallback" if local_ip else "Solo WireGuard",
+                "routing_mode": "ZeroTier + LAN fallback" if local_ip else "Solo ZeroTier",
             }
         )
     return rows
@@ -520,12 +565,49 @@ def ip_dashboard(request: Request, user: dict = Depends(_get_current_user)):
             "inventory_rows": rows,
             "inventory_summary": {
                 "total": len(rows),
-                "with_wireguard": sum(1 for row in rows if row["wireguard_ip"]),
+                "with_zerotier": sum(1 for row in rows if row["zerotier_ip"]),
                 "with_local": sum(1 for row in rows if row["local_ip"]),
                 "without_local": sum(1 for row in rows if not row["local_ip"]),
             },
         },
     )
+
+
+@app.post("/admin/ip-dashboard/scan")
+def scan_local_ips(_: dict = Depends(_require_admin)):
+    import concurrent.futures
+    devices = db.get_devices()
+    results = []
+
+    def scan_device(device):
+        device_id = device["id"]
+        name = device["name"]
+        host = device["host"]
+        
+        cmd = "hostname -I 2>/dev/null || true"
+        try:
+            raw_output = _ssh(device, cmd, timeout_sec=5)
+            ok, output = _normalize_ssh_result(raw_output)
+            if ok:
+                ips_str = output.strip()
+                detected_lan_ip = _parse_lan_ip(ips_str, host)
+                if detected_lan_ip:
+                    if device.get("host_lan") != detected_lan_ip:
+                        db.update_device_host_lan(device_id, detected_lan_ip)
+                    return {"id": device_id, "name": name, "local_ip": detected_lan_ip, "status": "Success"}
+                else:
+                    return {"id": device_id, "name": name, "local_ip": None, "status": "No LAN IP found"}
+            else:
+                return {"id": device_id, "name": name, "local_ip": None, "status": "SSH command failed"}
+        except Exception as exc:
+            return {"id": device_id, "name": name, "local_ip": None, "status": f"SSH connection failed: {_clean_ssh_error(exc)}"}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(scan_device, d): d for d in devices}
+        for future in concurrent.futures.as_completed(futures):
+            results.append(future.result())
+
+    return {"ok": True, "results": results}
 
 
 @app.post("/admin/maintenance")
@@ -576,6 +658,14 @@ def add_device(
         }
     )
     return RedirectResponse(url="/?msg=Dispositivo agregado", status_code=303)
+
+
+@app.get("/api/uploads/{upload_id}/status")
+def upload_status(upload_id: int, _: dict = Depends(_get_current_user)):
+    upload = db.get_upload(upload_id)
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload no encontrado")
+    return JSONResponse({"status": upload["status"], "detail": upload.get("detail")})
 
 
 @app.get("/uploads/{upload_id}")
@@ -731,8 +821,44 @@ def delete_user(user_id: int, _: dict = Depends(_require_admin)):
     return RedirectResponse(url="/?msg=Usuario eliminado", status_code=303)
 
 
+def _process_images_background(
+    upload_id: int,
+    batch_id: str,
+    saved: List[Path],
+    duration_sec: int,
+    video_path: Path,
+) -> None:
+    """Tarea en segundo plano: corre ffmpeg sin bloquear el request HTTP."""
+    try:
+        _build_video_from_images(saved, max(1, duration_sec), video_path)
+    except Exception as exc:
+        db.update_upload_status(upload_id, "error", str(exc))
+        db.create_video_history(
+            source_type="imagenes",
+            action="generar",
+            status="error",
+            batch_id=batch_id,
+            upload_id=upload_id,
+            filename=video_path.name,
+            detail=str(exc),
+        )
+        return
+
+    db.update_upload_status(upload_id, "ready", None)
+    db.create_video_history(
+        source_type="imagenes",
+        action="generar",
+        status="ok",
+        batch_id=batch_id,
+        upload_id=upload_id,
+        filename=video_path.name,
+        detail="Video generado desde imágenes",
+    )
+
+
 @app.post("/upload-images")
 def upload_images(
+    background_tasks: BackgroundTasks,
     _: dict = Depends(_get_current_user),
     duration_sec: int = Form(20),
     images: List[UploadFile] = File(...),
@@ -748,32 +874,18 @@ def upload_images(
     video_path = batch_dir / "VidLoop.mp4"
     upload_id = db.create_upload(batch_id, "processing", str(video_path), None)
 
-    try:
-        _build_video_from_images(saved, max(1, duration_sec), video_path)
-    except Exception as exc:
-        db.update_upload_status(upload_id, "error", str(exc))
-        db.create_video_history(
-            source_type="imagenes",
-            action="generar",
-            status="error",
-            batch_id=batch_id,
-            upload_id=upload_id,
-            filename=video_path.name,
-            detail=str(exc),
-        )
-        return RedirectResponse(url=f"/?err=Error al generar video: {exc}", status_code=303)
-
-    db.update_upload_status(upload_id, "ready", None)
-    db.create_video_history(
-        source_type="imagenes",
-        action="generar",
-        status="ok",
-        batch_id=batch_id,
-        upload_id=upload_id,
-        filename=video_path.name,
-        detail="Video generado desde imágenes",
+    # Encolar ffmpeg como tarea en segundo plano para evitar timeout de Cloudflare (524)
+    background_tasks.add_task(
+        _process_images_background,
+        upload_id,
+        batch_id,
+        saved,
+        duration_sec,
+        video_path,
     )
-    return FileResponse(video_path, media_type="video/mp4", filename=video_path.name)
+
+    # Redirigir de inmediato a la página de espera
+    return RedirectResponse(url=f"/?processing={upload_id}", status_code=303)
 
 
 @app.post("/deploy/{upload_id}")
@@ -914,6 +1026,41 @@ def reboot_device(device_id: int, user: dict = Depends(_get_current_user)):
     if error:
         return RedirectResponse(url=f"/?err={device['name']}: {error}", status_code=303)
     return RedirectResponse(url=f"/?msg=Reinicio enviado a {device['name']}", status_code=303)
+
+
+@app.post("/devices/{device_id}/rotate")
+def rotate_device(
+    device_id: int,
+    rotation: int = Form(...),
+    user: dict = Depends(_get_current_user),
+):
+    device = _device_by_id(device_id, user)
+    if rotation not in (0, 1, 3):
+        return RedirectResponse(url="/?err=Rotación no válida. Solo se admite 0 (Horizontal), 1 (90°) o 3 (-90°).", status_code=303)
+
+    # Preparar comando para editar boot config y reiniciar en segundo plano
+    rotate_cmd = (
+        "BOOT_CONFIG=\"/boot/config.txt\"; "
+        "[ -f \"$BOOT_CONFIG\" ] || BOOT_CONFIG=\"/boot/firmware/config.txt\"; "
+        "if [ -f \"$BOOT_CONFIG\" ]; then "
+        "sudo sed -i '/^[[:space:]]*#*[[:space:]]*display_rotate=/d' \"$BOOT_CONFIG\"; "
+    )
+    if rotation != 0:
+        rotate_cmd += f"echo 'display_rotate={rotation}' | sudo tee -a \"$BOOT_CONFIG\" >/dev/null; "
+    rotate_cmd += "fi; (sleep 2 && sudo -n reboot) &"
+
+    error = _run_device_control(device, rotate_cmd, timeout_sec=12)
+    if error:
+        return RedirectResponse(
+            url=f"/?err={device['name']}: No se pudo aplicar la rotación. {error}",
+            status_code=303,
+        )
+
+    db.update_device_rotation(device_id, rotation)
+    return RedirectResponse(
+        url=f"/?msg=Rotación enviada a {device['name']}. El dispositivo se está reiniciando para aplicar los cambios.",
+        status_code=303,
+    )
 
 
 @app.post("/devices/reboot-all")
@@ -1675,6 +1822,7 @@ def get_device_info(device_id: int, user: dict = Depends(_get_current_user)):
         "status": "Desconocido",
         "temperature": "--",
         "uptime": "--",
+        "host_lan": device.get("host_lan") or "--",
         "last_check": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "video_service": _infer_video_service(device),
         "video_path": (device.get("remote_path") or DEFAULT_REMOTE_PATH).strip(),
@@ -1693,6 +1841,7 @@ def get_device_info(device_id: int, user: dict = Depends(_get_current_user)):
         "[ -z \"$up\" ] && up='--'; "
         "printf 'temperature|%s\\n' \"$temp\"; "
         "printf 'uptime|%s\\n' \"$up\";"
+        "printf 'ips|%s\\n' \"$(hostname -I 2>/dev/null || true)\";"
     )
 
     try:
@@ -1702,12 +1851,24 @@ def get_device_info(device_id: int, user: dict = Depends(_get_current_user)):
         ok, output = _normalize_ssh_result(raw_output)
         if ok:
             info["status"] = "Online"
+            detected_ips_str = ""
             for line in output.splitlines():
                 if "|" not in line:
                     continue
                 key, value = line.split("|", 1)
                 if key in {"temperature", "uptime"} and value.strip():
                     info[key] = value.strip()
+                elif key == "ips":
+                    detected_ips_str = value.strip()
+            
+            if detected_ips_str:
+                detected_lan_ip = _parse_lan_ip(detected_ips_str, device["host"])
+                if detected_lan_ip:
+                    if device.get("host_lan") != detected_lan_ip:
+                        db.update_device_host_lan(device["id"], detected_lan_ip)
+                        device["host_lan"] = detected_lan_ip
+                    info["host_lan"] = detected_lan_ip
+            
             return {"ok": True, "device": {"id": device["id"], "name": device["name"]}, "info": info}
     except Exception as exc:
         return {

@@ -40,6 +40,7 @@ def init_db(db_path: Path = DB_DEFAULT) -> None:
                 remote_path TEXT NOT NULL,
                 remote_filename TEXT NOT NULL,
                 restart_cmd TEXT,
+                display_rotate INTEGER NOT NULL DEFAULT 0,
                 enabled INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
@@ -55,6 +56,8 @@ def init_db(db_path: Path = DB_DEFAULT) -> None:
             conn.execute("ALTER TABLE devices ADD COLUMN owner_user_id INTEGER")
         if "host_lan" not in columns:
             conn.execute("ALTER TABLE devices ADD COLUMN host_lan TEXT")
+        if "display_rotate" not in columns:
+            conn.execute("ALTER TABLE devices ADD COLUMN display_rotate INTEGER DEFAULT 0")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS uploads (
@@ -442,4 +445,22 @@ def toggle_schedule(schedule_id: int, enabled: bool, db_path: Path = DB_DEFAULT)
         conn.execute(
             "UPDATE schedules SET enabled = ? WHERE id = ?",
             (1 if enabled else 0, schedule_id),
+        )
+
+
+def update_device_rotation(device_id: int, rotation: int, db_path: Path = DB_DEFAULT) -> None:
+    """Actualiza la rotación de pantalla guardada de un dispositivo"""
+    with _connect(db_path) as conn:
+        conn.execute(
+            "UPDATE devices SET display_rotate = ? WHERE id = ?",
+            (rotation, device_id),
+        )
+
+
+def update_device_host_lan(device_id: int, host_lan: Optional[str], db_path: Path = DB_DEFAULT) -> None:
+    """Actualiza la IP local (host_lan) de un dispositivo"""
+    with _connect(db_path) as conn:
+        conn.execute(
+            "UPDATE devices SET host_lan = ? WHERE id = ?",
+            (host_lan, device_id),
         )
